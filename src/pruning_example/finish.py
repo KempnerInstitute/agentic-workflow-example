@@ -3,13 +3,14 @@ write the summary, run the report step, and copy the model."""
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from . import final_eval, metrics, records
+from . import config, final_eval, metrics, records
 from .agent import AgentError, tokens_used
 from .slurm import SlurmError
 
@@ -69,11 +70,14 @@ def evaluate_on_test_set(ctx, kind: str, round_no: int) -> dict | None:
 def write_summary(ctx, stop_reason: str, final: bool, selected=None, confirmation=None, tests=None) -> dict:
     budget = ctx.budget
     history = records.read_history(ctx.paths.state)
+    experiment_file = config.experiment_path(ctx.paths.project)
     summary = {
         "stop_reason": stop_reason,
         "final_steps_done": final,
         "time": datetime.now().isoformat(timespec="seconds"),
         "claude_version": os.environ.get("CLAUDE_VERSION", "unknown"),
+        "experiment_file": str(experiment_file.relative_to(ctx.paths.project)),
+        "experiment_sha256": hashlib.sha256(experiment_file.read_bytes()).hexdigest(),
         "target": {**ctx.experiment["target"],
                    "max_nonzero": metrics.max_nonzero(ctx.experiment["target"]["size_target"])},
         "round_attempts": len(history),

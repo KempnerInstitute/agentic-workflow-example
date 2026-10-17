@@ -48,8 +48,16 @@ def paths_from_env() -> Paths:
     )
 
 
+def experiment_path(project: Path) -> Path:
+    """Return the experiment file: EXPERIMENT_FILE if it is set, else experiment.yaml.
+
+    To test the loop with small limits, set EXPERIMENT_FILE to an edited copy outside Git control.
+    """
+    return project / os.environ.get("EXPERIMENT_FILE", str(EXPERIMENT_PATH))
+
+
 def load_experiment(project: Path) -> dict:
-    with open(project / EXPERIMENT_PATH) as f:
+    with open(experiment_path(project)) as f:
         return yaml.safe_load(f)
 
 

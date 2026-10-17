@@ -276,6 +276,8 @@ def job_end_time() -> float | None:
 def run(ctx: Context, finish_only: bool = False) -> int:
     """Run the rounds and the final steps. On SIGTERM, cancel the running job and stop."""
     reason = "finish_only"
+    ctx.log(f"experiment file: {config.experiment_path(ctx.paths.project).relative_to(ctx.paths.project)}, "
+            f"state folder: {ctx.paths.state.relative_to(ctx.paths.project)}")
     try:
         if not finish_only:
             check_start(ctx)
