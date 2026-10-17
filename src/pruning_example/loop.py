@@ -161,6 +161,7 @@ def run_attempt(ctx: Context, round_no: int) -> None:
     records.check_integrity(ctx.paths.project)
     history = records.read_history(state)
     prompt = render(ctx.paths.project / "prompts" / "agent_step.md", {
+        "STATE": state.relative_to(ctx.paths.project),
         "N": round_no,
         "R": ctx.budget["max_round_attempts"] - len(history),
         "G": round(max(0.0, ctx.budget["gpu_minutes"] - ctx.ledger.gpu_minutes)),

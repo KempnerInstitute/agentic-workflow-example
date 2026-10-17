@@ -103,7 +103,8 @@ def run_report_step(ctx) -> None:
     if ctx.ledger.tokens + estimate > ctx.budget["tokens"]:
         ctx.log("report step skipped: not enough tokens are left")
         return
-    prompt = (ctx.paths.project / "prompts" / "report_step.md").read_text()
+    prompt = (ctx.paths.project / "prompts" / "report_step.md").read_text().replace(
+        "{STATE}", str(ctx.paths.state.relative_to(ctx.paths.project)))
     try:
         result = ctx.agent.run(prompt, ctx.experiment["report_step"])
     except AgentError as error:
