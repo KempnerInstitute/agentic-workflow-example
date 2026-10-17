@@ -21,5 +21,5 @@ source cluster.env
 export PATH="$HOME/.local/bin:$PATH"
 CLAUDE_VERSION="$(claude --version)"
 export CLAUDE_VERSION
-echo "start $(date -Is) on $(hostname -s), Claude Code ${CLAUDE_VERSION}"
+echo "start $(date -Is) on $(hostname -s), ${CLAUDE_VERSION}"
 exec .venv/bin/python -m pruning_example.loop "$@"
