@@ -72,10 +72,19 @@ def run_folder(run_root: Path, commit: str, kind: str) -> Path:
     marker = markers / f"{kind}_{job_id()}.txt"
     if job_id() != "local" and marker.exists():
         return run_root / marker.read_text().strip()
-    name = f"{datetime.now():%Y-%m-%d_%H%M%S}_{commit[:8]}"
-    if (run_root / name).exists():
-        name = f"{name}_{job_id()}"
-    (run_root / name).mkdir(parents=True)
+    # Jobs can start in the same second with the same commit, so add the job ID, and retry on a clash.
+    base = f"{datetime.now():%Y-%m-%d_%H%M%S}_{commit[:8]}"
+    if job_id() != "local":
+        base = f"{base}_{job_id()}"
+    for attempt in range(100):
+        name = base if attempt == 0 else f"{base}_{attempt}"
+        try:
+            (run_root / name).mkdir(parents=True)
+            break
+        except FileExistsError:
+            continue
+    else:
+        raise RuntimeError(f"cannot make a run folder for {base}")
     marker.write_text(name + "\n")
     return run_root / name
 

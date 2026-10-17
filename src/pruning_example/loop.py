@@ -187,7 +187,7 @@ def run_attempt(ctx: Context, round_no: int) -> None:
     except ConfigError as error:
         fail(ctx, round_no, "invalid_config", str(error))
         return
-    config_path = Path("agent") / f"round_{round_no:02d}.json"
+    config_path = state.relative_to(ctx.paths.project) / "configs" / f"round_{round_no:02d}.json"
     records.write_json(ctx.paths.project / config_path, round_config)
     with open(state / "notes.md", "a") as notes:
         notes.write(f"## Round {round_no}\n\n{round_config['reason']}\n\n")
@@ -284,7 +284,7 @@ def run(ctx: Context, finish_only: bool = False) -> int:
             reason = run_rounds(ctx)
             ctx.log(f"stop: {reason}")
         finish.run_final_steps(ctx, reason)
-        ctx.log("final steps done: see state/summary.json and reports/final_report.md")
+        ctx.log(f"final steps done: see {ctx.paths.state.name}/summary.json and {ctx.paths.state.name}/final_report.md")
         return 0
     except Terminated:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)

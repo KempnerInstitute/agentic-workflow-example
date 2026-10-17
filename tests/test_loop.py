@@ -234,4 +234,4 @@ def test_final_steps_write_the_summary_and_the_report(started, monkeypatch):
     assert summary["test"]["selected"]["test_accuracy"] == 0.902
     assert summary["tokens"]["total"] == 2 * 50_000  # one agent step and the report step
     assert ("confirm", 2) in slurm.submitted
-    assert (started / "reports" / "final_report.md").read_text().strip() == "Draft report."
+    assert (state / "final_report.md").read_text().strip() == "Draft report."

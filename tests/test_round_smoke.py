@@ -35,6 +35,13 @@ def test_round_writes_exact_records(project):
     assert not records.integrity_problems(project)
 
 
+def test_run_folders_do_not_clash(tmp_path):
+    first = records.run_folder(tmp_path, "0123456789abcdef", "round")
+    second = records.run_folder(tmp_path, "0123456789abcdef", "round")
+    assert first != second
+    assert first.is_dir() and second.is_dir()
+
+
 def test_check_round_finds_a_changed_record(project, capsys):
     test_round_writes_exact_records(project)
     log = project / "logs" / "prune-round_local.out"

@@ -117,9 +117,7 @@ def run_report_step(ctx) -> None:
     records.write_json(ctx.paths.state / "agent_steps" / "report.json", result)
     ctx.ledger.add(round="", kind="report", status=result.get("subtype", ""),
                    tokens=tokens_used(result), cost_usd=result.get("total_cost_usd", 0))
-    reports = ctx.paths.project / "reports"
-    reports.mkdir(exist_ok=True)
-    (reports / "final_report.md").write_text(str(result.get("result", "")).strip() + "\n")
+    (ctx.paths.state / "final_report.md").write_text(str(result.get("result", "")).strip() + "\n")
 
 
 def run_final_steps(ctx, stop_reason: str) -> dict:
@@ -142,9 +140,10 @@ def run_final_steps(ctx, stop_reason: str) -> dict:
         if confirm:
             tests["confirmation"] = evaluate_on_test_set(ctx, "confirm", round_no)
         model = Path(records.read_json(folder / "run_meta.json")["run_folder"]) / "model.pt"
-        if model.exists():
-            (ctx.paths.project / "results" / "final").mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(model, ctx.paths.project / "results" / "final" / f"round_{round_no:02d}_model.pt")
+        if model.exists():  # scratch files are temporary, so keep a copy on lab storage
+            target = ctx.paths.project / "results" / state.name
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(model, target / f"round_{round_no:02d}_model.pt")
     write_summary(ctx, stop_reason, True, selected, confirmation, tests)
     run_report_step(ctx)
     return write_summary(ctx, stop_reason, True, selected, confirmation, tests)
