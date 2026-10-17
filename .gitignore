@@ -11,9 +11,10 @@ __pycache__/
 logs/
 state/
 agent/
-reports/
 results/
-calibration/
 
 # Personal Claude Code settings
 .claude/settings.local.json
+
+# Test copies of experiment.yaml and test state folders
+local/

@@ -14,7 +14,7 @@
       "Bash(.venv/bin/python -m pruning_example.final_eval *)",
       "Edit(./src/**)", "Edit(./slurm/**)", "Edit(./configs/**)", "Edit(./prompts/**)",
       "Edit(./data/**)", "Edit(./tests/**)", "Edit(./.claude/**)", "Edit(./.github/**)",
-      "Edit(./state/**)", "Edit(./results/**)", "Edit(./reports/**)", "Edit(./logs/**)",
+      "Edit(./state/**)", "Edit(./results/**)", "Edit(./local/**)", "Edit(./logs/**)",
       "Edit(./AGENTS.md)", "Edit(./CLAUDE.md)", "Edit(./experiment.yaml)",
       "Edit(./pyproject.toml)", "Edit(./uv.lock)", "Edit(./README.md)", "Edit(./LICENSE)",
       "Edit(./CITATION.cff)", "Edit(./.gitignore)", "Edit(./.python-version)",

@@ -3,7 +3,7 @@
 
 target:
   val_accuracy: 0.905        # 0.900 plus a margin for noise in 5,000 validation images
-  size_target: 0.02          # largest fraction of prunable weights left (calibration sets this value)
+  size_target: 0.008         # 0.8%: in calibration, iterative pruning reached 0.9074 here, one-shot 0.9006
 
 baseline:
   epochs: 40
