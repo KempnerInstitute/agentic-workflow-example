@@ -287,15 +287,18 @@ def run(ctx: Context, finish_only: bool = False) -> int:
         ctx.log(f"final steps done: see {ctx.paths.state.name}/summary.json and {ctx.paths.state.name}/final_report.md")
         return 0
     except Terminated:
+        # SLURM sends SIGKILL after KillWait (30 seconds on the cluster), so keep each step short.
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         ctx.agent.stop()
+        finish.write_summary(ctx, "terminated", final=False)
         current = ctx.paths.state / "current_job"
         if current.exists():
-            ctx.slurm.cancel(current.read_text().strip())
+            job = current.read_text().strip()
+            answered = ctx.slurm.cancel(job, wait_seconds=15)
             current.unlink(missing_ok=True)
-        finish.write_summary(ctx, "terminated", final=False)
-        ctx.log("SIGTERM: the loop script canceled its own round job and stopped. "
-                "Run 'sbatch slurm/loop.sbatch --finish' for the final steps.")
+            ctx.log(f"SIGTERM: asked SLURM to cancel round job {job}"
+                    f"{'' if answered else ' (scancel did not answer in 15 seconds)'}.")
+        ctx.log("SIGTERM: the loop script stopped. Run 'sbatch slurm/loop.sbatch --finish' for the final steps.")
         return 1
 
 

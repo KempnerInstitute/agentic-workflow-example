@@ -77,8 +77,9 @@ class FakeSlurm:
     def accounting(self, job_id):
         return Accounting("COMPLETED", self.gpu_minutes, 1)
 
-    def cancel(self, job_id):
+    def cancel(self, job_id, wait_seconds=60):
         self.canceled.append(job_id)
+        return True
 
 
 @pytest.fixture
@@ -159,7 +160,7 @@ def test_stops_when_a_tracked_file_changed(started):
 
 def test_stops_without_time_for_one_more_round(started):
     ctx = context(started, FakeAgent(lambda call: GOOD), FakeSlurm(started / "state", lambda n: (0.89, SMALL)))
-    ctx.job_end = ctx.clock() + 60 * 60  # one hour left; a round needs 20 + 45 + 80 minutes
+    ctx.job_end = ctx.clock() + 60 * 60  # one hour left; a round needs 10 + 45 + 65 minutes
     assert loop.run_rounds(ctx) == "time_left"
 
 
@@ -173,9 +174,26 @@ def test_sigterm_cancels_the_running_round_job(started, monkeypatch):
     ctx = context(started, FakeAgent(lambda call: GOOD), slurm)
     assert loop.run(ctx) == 1
     assert slurm.canceled == ["1001"]
+    assert not (started / "state" / "current_job").exists()
     summary = records.read_json(started / "state" / "summary.json")
     assert summary["stop_reason"] == "terminated"
     assert summary["final_steps_done"] is False
+
+
+def test_sigterm_writes_the_summary_when_scancel_is_late(started, monkeypatch):
+    class LateSlurm(FakeSlurm):
+        def wait(self, job_id, queue_limit_seconds):
+            raise loop.Terminated()
+
+        def cancel(self, job_id, wait_seconds=60):
+            self.canceled.append(job_id)
+            return False  # scancel did not answer in time
+
+    monkeypatch.setattr(loop.signal, "signal", lambda *args: None)
+    slurm = LateSlurm(started / "state", lambda n: None)
+    assert loop.run(context(started, FakeAgent(lambda call: GOOD), slurm)) == 1
+    assert slurm.canceled == ["1001"]
+    assert records.read_json(started / "state" / "summary.json")["stop_reason"] == "terminated"
 
 
 def test_tokens_add_all_models_and_cache_reads():

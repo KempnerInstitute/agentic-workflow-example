@@ -80,6 +80,6 @@ class Agent:
         if process is not None and process.poll() is None:
             process.terminate()
             try:
-                process.wait(timeout=10)
+                process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()

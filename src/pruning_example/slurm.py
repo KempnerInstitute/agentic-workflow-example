@@ -125,5 +125,14 @@ class Slurm:
             return found
         raise SlurmError(f"sacct has no record of job {job_id}")
 
-    def cancel(self, job_id: str) -> None:
-        self.run(["scancel", job_id], timeout=10)
+    def cancel(self, job_id: str, wait_seconds: float = 60) -> bool:
+        """Ask SLURM to cancel the job. Return True if scancel answered in time.
+
+        Do not raise: on a busy cluster, scancel can answer late, and SLURM cancels the job anyway.
+        """
+        try:
+            process = subprocess.Popen(["scancel", job_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            process.wait(timeout=wait_seconds)
+            return process.returncode == 0
+        except (subprocess.TimeoutExpired, OSError):
+            return False
