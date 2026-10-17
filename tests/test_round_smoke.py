@@ -35,11 +35,19 @@ def test_round_writes_exact_records(project):
     assert not records.integrity_problems(project)
 
 
-def test_run_folders_do_not_clash(tmp_path):
+def test_run_folders_do_not_clash(tmp_path, monkeypatch):
+    monkeypatch.delenv("SLURM_JOB_ID", raising=False)  # inside a job, run_folder reuses the folder of the job
     first = records.run_folder(tmp_path, "0123456789abcdef", "round")
     second = records.run_folder(tmp_path, "0123456789abcdef", "round")
     assert first != second
     assert first.is_dir() and second.is_dir()
+
+
+def test_a_requeued_job_gets_its_run_folder_again(tmp_path, monkeypatch):
+    monkeypatch.setenv("SLURM_JOB_ID", "4242")
+    first = records.run_folder(tmp_path, "0123456789abcdef", "round")
+    assert first.name.endswith("_01234567_4242")
+    assert records.run_folder(tmp_path, "0123456789abcdef", "round") == first
 
 
 def test_check_round_finds_a_changed_record(project, capsys):
