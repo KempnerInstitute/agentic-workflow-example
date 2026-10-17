@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this example, cite it as below."
+title: "Agentic Workflow Example: an agent prunes ResNet-18 on CIFAR-10"
+type: software
+authors:
+  - name: "Kempner Institute for the Study of Natural and Artificial Intelligence, Harvard University"
+license: MIT
+repository-code: "https://github.com/KempnerInstitute/agentic-workflow-example"
+keywords:
+  - agentic workflows
+  - Claude Code
+  - SLURM
+  - pruning

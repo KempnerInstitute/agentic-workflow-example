@@ -1,0 +1,51 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(squeue -j *)",
+      "Bash(sacct -j *)",
+      "Bash(.venv/bin/python -m pytest *)",
+      "Bash(.venv/bin/python -m pruning_example.check_round *)"
+    ],
+    "ask": [
+      "Bash(sbatch *)", "Bash(srun *)", "Bash(salloc *)", "Bash(scancel *)",
+      "Bash(scontrol *)", "Bash(scrontab *)"
+    ],
+    "deny": [
+      "Bash(.venv/bin/python -m pruning_example.final_eval *)",
+      "Edit(./src/**)", "Edit(./slurm/**)", "Edit(./configs/**)", "Edit(./prompts/**)",
+      "Edit(./data/**)", "Edit(./tests/**)", "Edit(./.claude/**)", "Edit(./.github/**)",
+      "Edit(./state/**)", "Edit(./results/**)", "Edit(./reports/**)", "Edit(./logs/**)",
+      "Edit(./AGENTS.md)", "Edit(./CLAUDE.md)", "Edit(./experiment.yaml)",
+      "Edit(./pyproject.toml)", "Edit(./uv.lock)", "Edit(./README.md)", "Edit(./LICENSE)",
+      "Edit(./CITATION.cff)", "Edit(./.gitignore)", "Edit(./.python-version)",
+      "Edit(./cluster.env)", "Edit(./cluster.env.example)",
+      "Read(~/.ssh/**)", "Read(~/.netrc)", "Read(~/.cache/huggingface/**)", "Read(~/.config/gh/**)"
+    ],
+    "blockReadsOutsideWorkingDirectories": true
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "autoAllowBashIfSandboxed": false,
+    "excludedCommands": [
+      "squeue *", "sacct *", "sinfo *", "seff *", "sstat *", "scontrol *",
+      "sbatch *", "srun *", "salloc *", "scancel *"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Monitor",
+        "hooks": [
+          {"type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard.sh"},
+          {"type": "command", "command": "jq -r '.tool_input.command // empty' >> \"$CLAUDE_PROJECT_DIR\"/logs/agent-commands.log"}
+        ]
+      }
+    ]
+  },
+  "env": {
+    "DISABLE_AUTOUPDATER": "1"
+  },
+  "disableRemoteControl": true
+}

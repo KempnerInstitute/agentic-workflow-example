@@ -22,7 +22,8 @@ def project(tmp_path, monkeypatch) -> Path:
     folder.mkdir()
     for name in ("experiment.yaml", ".gitignore"):
         shutil.copy(REPO / name, folder / name)
-    shutil.copytree(REPO / "configs", folder / "configs")
+    for name in ("configs", "prompts", "slurm"):
+        shutil.copytree(REPO / name, folder / name)
     git(folder, "init", "-q")
     git(folder, "-c", "user.name=test", "-c", "user.email=test@example.com", "add", "-A")
     git(folder, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "test project")

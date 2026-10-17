@@ -1,0 +1,1 @@
+Read state/summary.json, state/history.tsv, and state/notes.md. Write a short report in Markdown: the result, the path of the rounds, and the limits used. Use only numbers from these files. Do not try to run commands or write files.
