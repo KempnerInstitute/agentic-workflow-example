@@ -1,0 +1,19 @@
+# Your cluster paths
+cluster.env
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+
+# Outputs of the jobs and the loop script
+logs/
+state/
+agent/
+reports/
+results/
+calibration/
+
+# Personal Claude Code settings
+.claude/settings.local.json

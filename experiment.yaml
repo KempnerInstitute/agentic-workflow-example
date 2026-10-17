@@ -1,0 +1,39 @@
+# Settings and limits of the experiment.
+# Read this file before you start the loop job: it sets the budget of the unattended phase.
+
+target:
+  val_accuracy: 0.905        # 0.900 plus a margin for noise in 5,000 validation images
+  size_target: 0.02          # largest fraction of prunable weights left (calibration sets this value)
+
+baseline:
+  epochs: 40
+  lr: 0.1
+  warmup_epochs: 2
+  momentum: 0.9
+  weight_decay: 5.0e-4
+  batch_size: 256
+
+round:
+  batch_size: 256
+  momentum: 0.9
+  time_minutes: 20           # must agree with --time in slurm/round.sbatch
+
+budget:
+  tokens: 1000000            # all four token types of all models, cache reads included
+  report_reserve_fraction: 0.10
+  step_token_estimate: 60000 # used before the first measured agent step
+  gpu_minutes: 180           # unattended phase; failed and requeued runs count
+  max_round_attempts: 15     # round 1 included
+  max_failed_in_a_row: 2
+  queue_limit_minutes: 45    # total queue time of one job, requeues included
+  final_reserve_minutes: 80  # time kept for the final steps
+
+agent_step:
+  max_turns: 8
+  max_budget_usd: 1.00
+  timeout_minutes: 15
+
+report_step:
+  max_turns: 6
+  max_budget_usd: 1.00
+  timeout_minutes: 15

@@ -1,0 +1,9 @@
+{
+  "sparsity": 0.9,
+  "steps": 2,
+  "finetune_epochs": 10,
+  "lr": 0.01,
+  "weight_decay": 0.0005,
+  "exclude_layers": ["conv1"],
+  "reason": "A first test: prune 90% of the weights in two steps, and keep the first convolution dense."
+}

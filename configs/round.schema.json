@@ -1,0 +1,49 @@
+{
+  "title": "Round configuration",
+  "type": "object",
+  "properties": {
+    "sparsity": {
+      "type": "number",
+      "minimum": 0.5,
+      "maximum": 0.995,
+      "description": "Fraction of the weights in the pruned layers to remove."
+    },
+    "steps": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Number of pruning steps. 1 is one-shot pruning."
+    },
+    "finetune_epochs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "description": "Total fine-tuning epochs, divided into one block for each step. Must be at least steps."
+    },
+    "lr": {
+      "type": "number",
+      "minimum": 0.0001,
+      "maximum": 0.1,
+      "description": "Learning rate at the start of each fine-tuning block. It decays with a cosine curve in the block."
+    },
+    "weight_decay": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 0.001,
+      "description": "Weight decay."
+    },
+    "exclude_layers": {
+      "type": "array",
+      "items": {"enum": ["conv1", "fc"]},
+      "uniqueItems": true,
+      "description": "Layers that the round job does not prune. These layers still count in the weights left."
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 600,
+      "description": "Why you chose this configuration."
+    }
+  },
+  "required": ["sparsity", "steps", "finetune_epochs", "lr", "weight_decay", "exclude_layers", "reason"],
+  "additionalProperties": false
+}
