@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=8G
-#SBATCH --time=12:00:00
+#SBATCH --time=06:00:00
 #SBATCH --signal=B:SIGTERM@120
 #SBATCH --output=logs/%x_%j.out
 

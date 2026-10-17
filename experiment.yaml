@@ -16,17 +16,17 @@ baseline:
 round:
   batch_size: 256
   momentum: 0.9
-  time_minutes: 20           # must agree with --time in slurm/round.sbatch
+  time_minutes: 10           # must agree with --time in slurm/round.sbatch
 
 budget:
   tokens: 1000000            # all four token types of all models, cache reads included
   report_reserve_fraction: 0.10
   step_token_estimate: 60000 # used before the first measured agent step
-  gpu_minutes: 180           # unattended phase; failed and requeued runs count
+  gpu_minutes: 60            # unattended phase; failed and requeued runs count
   max_round_attempts: 15     # round 1 included
   max_failed_in_a_row: 2
   queue_limit_minutes: 45    # total queue time of one job, requeues included
-  final_reserve_minutes: 80  # time kept for the final steps
+  final_reserve_minutes: 65  # time kept for the final steps
 
 agent_step:
   max_turns: 8
