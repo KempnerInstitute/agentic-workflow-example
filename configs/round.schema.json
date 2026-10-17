@@ -5,7 +5,7 @@
     "sparsity": {
       "type": "number",
       "minimum": 0.5,
-      "maximum": 0.995,
+      "maximum": 0.999,
       "description": "Fraction of the weights in the pruned layers to remove."
     },
     "steps": {

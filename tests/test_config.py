@@ -21,6 +21,7 @@ def test_example_configuration_is_valid():
 
 @pytest.mark.parametrize("bad", [
     changed(sparsity=1.5),
+    changed(sparsity=0.9995),
     changed(sparsity=0.2),
     changed(steps=0),
     changed(finetune_epochs=21),
