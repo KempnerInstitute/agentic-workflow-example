@@ -123,7 +123,7 @@ def stop_reason(ctx: Context) -> str | None:
     """Return the reason to stop before the next round, or None."""
     budget = ctx.budget
     history = records.read_history(ctx.paths.state)
-    if any(row["status"] == "ok" and row["meets_target"] == "yes" for row in history):
+    if any(finish.row_meets_target(row, ctx.experiment["target"]) for row in history):
         return "target"
     if len(history) >= budget["max_round_attempts"]:
         return "round_limit"

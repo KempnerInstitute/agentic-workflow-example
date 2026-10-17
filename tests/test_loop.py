@@ -111,6 +111,17 @@ def test_stops_when_a_round_meets_the_target(started):
     assert (state / "notes.md").read_text().count("## Round") == 2
 
 
+def test_the_current_target_decides_not_the_stored_flag(started):
+    state = started / "state"
+    row = records.history_row(2, "ok", GOOD, {"val_accuracy": 0.93, "weights_left": 0.02, "nonzero": 223_287,
+                                              "meets_target": True})  # met an earlier, larger size target
+    records.append_history(state, row)
+    ctx = context(started, FakeAgent(lambda call: GOOD), FakeSlurm(state, lambda n: (0.89, SMALL)),
+                  max_round_attempts=2)
+    ctx.experiment["target"]["size_target"] = 0.008  # the current target allows 89,314 weights
+    assert loop.stop_reason(ctx) == "round_limit"
+
+
 def test_stops_before_the_token_budget(started):
     agent = FakeAgent(lambda call: GOOD, tokens=300_000)
     ctx = context(started, agent, FakeSlurm(started / "state", lambda n: (0.89, SMALL)),
@@ -233,7 +244,7 @@ def test_select_round_rules():
         {"round": "3", "status": "invalid_config", "meets_target": "", "val_accuracy": "", "nonzero": ""},
     ]
     assert finish.select_round(rows, TARGET)["round"] == "2"
-    rows[1]["meets_target"] = "no"
+    rows[1]["nonzero"] = "300000"  # too many weights for the target, but enough accuracy
     assert finish.select_round(rows, TARGET)["round"] == "2"  # enough accuracy, fewest weights
     rows[1]["val_accuracy"] = "0.9000"
     rows[0]["val_accuracy"] = "0.9040"

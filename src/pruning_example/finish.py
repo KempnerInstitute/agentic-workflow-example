@@ -17,6 +17,11 @@ from .slurm import SlurmError
 RESULT_KEYS = ("val_accuracy", "val_interval", "nonzero", "weights_left", "sparse_size_mb", "meets_target")
 
 
+def row_meets_target(row: dict, target: dict) -> bool:
+    """Compare a history row with the current target, not with the decision stored at the time of the round."""
+    return row["status"] == "ok" and metrics.meets_target(float(row["val_accuracy"]), int(row["nonzero"]), target)
+
+
 def select_round(history: list[dict], target: dict) -> dict | None:
     """Select the round for the final steps.
 
@@ -25,7 +30,7 @@ def select_round(history: list[dict], target: dict) -> dict | None:
     accuracy, use the round with the highest validation accuracy.
     """
     ok = [row for row in history if row["status"] == "ok"]
-    met = [row for row in ok if row["meets_target"] == "yes"]
+    met = [row for row in ok if row_meets_target(row, target)]
     if met:
         return min(met, key=lambda row: int(row["nonzero"]))
     accurate = [row for row in ok if float(row["val_accuracy"]) >= target["val_accuracy"]]

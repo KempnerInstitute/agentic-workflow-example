@@ -52,7 +52,7 @@ def main(argv=None) -> int:
         "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     records.write_json(out, result)
-    print(f"{args.kind} round {args.round}: test_accuracy={test_accuracy:.4f}")
+    print(f"test evaluation, {args.kind} {args.round}: test_accuracy={test_accuracy:.4f}")
     return 0
 
 
