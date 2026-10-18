@@ -84,15 +84,32 @@ def evaluate_on_test_set(ctx, kind: str, round_no: int) -> dict | None:
     return records.read_json(out) if out.exists() else None
 
 
-def write_summary(ctx, stop_reason: str, final: bool, selected=None, confirmation=None, tests=None) -> dict:
+def previous_stop_reason(ctx) -> str | None:
+    """Return the stop reason of an earlier loop job, or None."""
+    path = ctx.paths.state / "summary.json"
+    return records.read_json(path)["stop_reason"] if path.exists() else None
+
+
+def agent_models(ctx) -> list[str]:
+    """Return the models that the agent steps and the report step used."""
+    models = set()
+    for path in sorted((ctx.paths.state / "agent_steps").glob("*.json")):
+        models.update(records.read_json(path).get("modelUsage", {}).keys())
+    return sorted(models)
+
+
+def write_summary(ctx, stop_reason: str, final: bool, selected=None, confirmation=None, tests=None,
+                  terminated: bool = False) -> dict:
     budget = ctx.budget
     history = records.read_history(ctx.paths.state)
     experiment_file = config.experiment_path(ctx.paths.project)
     summary = {
         "stop_reason": stop_reason,
         "final_steps_done": final,
+        "terminated": terminated,
         "time": datetime.now().isoformat(timespec="seconds"),
         "claude_version": os.environ.get("CLAUDE_VERSION", "unknown"),
+        "agent_models": agent_models(ctx),
         "experiment_file": str(experiment_file.relative_to(ctx.paths.project)),
         "experiment_sha256": hashlib.sha256(experiment_file.read_bytes()).hexdigest(),
         "target": ctx.experiment["target"],
@@ -138,8 +155,6 @@ def run_report_step(ctx) -> None:
 
 def run_final_steps(ctx, stop_reason: str) -> dict:
     state = ctx.paths.state
-    if stop_reason == "finish_only" and (state / "summary.json").exists():
-        stop_reason = records.read_json(state / "summary.json")["stop_reason"]
     row = select_round(records.read_history(state), ctx.experiment["target"])
     selected = confirmation = None
     tests = {}
@@ -147,7 +162,7 @@ def run_final_steps(ctx, stop_reason: str) -> dict:
         round_no = int(row["round"])
         folder = state / "rounds" / f"round_{round_no:02d}"
         result = records.read_json(folder / "metrics.json")
-        selected = {"round": round_no, "config": records.read_json(folder / "config.json"),
+        selected = {"round": round_no, "seed": result.get("seed", 0), "config": records.read_json(folder / "config.json"),
                     **{key: result[key] for key in RESULT_KEYS}}
         confirm = confirmation_round(ctx, round_no)
         if confirm:

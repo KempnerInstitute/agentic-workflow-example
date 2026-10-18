@@ -19,6 +19,7 @@
       "Edit(./pyproject.toml)", "Edit(./uv.lock)", "Edit(./README.md)", "Edit(./LICENSE)",
       "Edit(./CITATION.cff)", "Edit(./.gitignore)", "Edit(./.python-version)",
       "Edit(./cluster.env)", "Edit(./cluster.env.example)",
+      "Read(./cluster.env)", "Read(./logs/agent-commands.log)",
       "Read(~/.ssh/**)", "Read(~/.netrc)", "Read(~/.cache/huggingface/**)", "Read(~/.config/gh/**)"
     ],
     "blockReadsOutsideWorkingDirectories": true

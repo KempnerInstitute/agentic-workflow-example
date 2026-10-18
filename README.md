@@ -15,23 +15,30 @@ In the unattended phase, the agent has read-only tools. It cannot run commands, 
 ## Before you start
 
 - A Kempner AI cluster account, and a SLURM account that can use `kempner_requeue` and `shared`.
-- Claude Code, signed in with the Claude access that HUIT provides through Harvard SSO. Leave `ANTHROPIC_API_KEY` unset.
+- Claude Code from the native installer, because the loop job looks for `claude` in `~/.local/bin`. Sign in with the Claude access that HUIT provides through Harvard SSO, and leave `ANTHROPIC_API_KEY` unset.
 - [uv](https://docs.astral.sh/uv/).
 - The data is the shared copy of CIFAR-10 on the cluster. CIFAR-10 is public data (Level 1).
 
 ## Set up
 
-Clone the repository into lab storage, set your values, and build the environment on a compute node:
+Clone the repository into lab storage, and copy the settings file:
 
 ```bash
+mkdir -p /n/holylabs/LABS/<lab_name>/Users/<username>
 cd /n/holylabs/LABS/<lab_name>/Users/<username>
 git clone https://github.com/KempnerInstitute/agentic-workflow-example.git
 cd agentic-workflow-example
-cp cluster.env.example cluster.env      # set your account and your paths
-source cluster.env
-mkdir -p logs && chmod 700 logs          # the hook writes the command log here
+cp cluster.env.example cluster.env
+```
+
+Edit `cluster.env`: set your SLURM account (`sshare -U -u $USER` lists your accounts), and your lab name and user name in the paths. Then load the file, and build the environment on a compute node:
+
+```bash
+source cluster.env && echo "$SBATCH_ACCOUNT $RUN_ROOT"   # check the values
+mkdir -p logs && chmod 700 logs          # the hook writes logs/agent-commands.log here
 salloc --partition=test --time=0-01:00 --mem=16G --cpus-per-task=4
 uv sync --locked --extra gpu             # about 5 GB of packages
+readlink -f .venv/bin/python             # must not be in your home directory
 exit
 ```
 

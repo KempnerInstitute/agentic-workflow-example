@@ -283,11 +283,13 @@ def job_end_time() -> float | None:
 
 def run(ctx: Context, finish_only: bool = False) -> int:
     """Run the rounds and the final steps. On SIGTERM, cancel the running job and stop."""
-    reason = "finish_only"
+    reason = None  # the stop reason of the rounds, once they end
     ctx.log(f"experiment file: {config.experiment_path(ctx.paths.project).relative_to(ctx.paths.project)}, "
             f"state folder: {ctx.paths.state.relative_to(ctx.paths.project)}")
     try:
-        if not finish_only:
+        if finish_only:
+            reason = finish.previous_stop_reason(ctx) or "finish_only"
+        else:
             check_start(ctx)
             reason = run_rounds(ctx)
             ctx.log(f"stop: {reason}")
@@ -298,7 +300,8 @@ def run(ctx: Context, finish_only: bool = False) -> int:
         # SLURM sends SIGKILL after KillWait (30 seconds on the cluster), so keep each step short.
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         ctx.agent.stop()
-        finish.write_summary(ctx, "terminated", final=False)
+        # Keep the stop reason of the rounds if they ended, so that --finish can use it.
+        finish.write_summary(ctx, reason or "terminated", final=False, terminated=True)
         current = ctx.paths.state / "current_job"
         if current.exists():
             job = current.read_text().strip()

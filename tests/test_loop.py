@@ -285,8 +285,26 @@ def test_final_steps_write_the_summary_and_the_report(started, monkeypatch):
     monkeypatch.setattr(finish, "evaluate_on_test_set", lambda ctx, kind, n: {"test_accuracy": 0.902, "kind": kind})
     summary = finish.run_final_steps(ctx, "plateau")
     assert summary["selected"]["round"] == 2
+    assert summary["selected"]["seed"] == 0
+    assert summary["agent_models"] == ["model-a"]
     assert summary["confirmation"]["seed"] == 1
     assert summary["test"]["selected"]["test_accuracy"] == 0.902
     assert summary["tokens"]["total"] == 3 * 50_000  # two agent steps and the report step
     assert ("confirm", 2) in slurm.submitted
     assert (state / "final_report.md").read_text().strip() == "Draft report."
+
+
+def test_sigterm_in_the_final_steps_keeps_the_stop_reason(started, monkeypatch):
+    class StopInConfirmation(FakeSlurm):
+        def wait(self, job_id, queue_limit_seconds):
+            if self.submitted[-1][0] == "confirm":
+                raise loop.Terminated()
+            return "ended"
+
+    monkeypatch.setattr(loop.signal, "signal", lambda *args: None)
+    slurm = StopInConfirmation(started / "state", lambda n: (0.91, SMALL))
+    assert loop.run(context(started, FakeAgent(lambda call: GOOD), slurm, plateau_rounds=1)) == 1
+    summary = records.read_json(started / "state" / "summary.json")
+    assert summary["stop_reason"] == "plateau"  # --finish can use it later
+    assert summary["terminated"] is True
+    assert summary["final_steps_done"] is False
