@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0  # setup-uv has no major-version tag
       # The cpu extra installs the CPU builds of PyTorch. The tests use generated images.
       - run: uv sync --locked --extra cpu
       - run: .venv/bin/python -m pytest -q
