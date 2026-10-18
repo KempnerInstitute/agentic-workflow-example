@@ -15,6 +15,8 @@ FINAL_STATES = {
     "DEADLINE", "PREEMPTED",
 }
 QUEUE_WAIT_STATES = {"PENDING", "REQUEUED", "REQUEUE_HOLD", "REQUEUE_FED", "CONFIGURING"}
+# sbatch errors of a busy SLURM controller. A new try can succeed.
+TRANSIENT_ERRORS = ("Socket timed out", "timed out", "Resource temporarily unavailable", "try again")
 
 
 class SlurmError(RuntimeError):
@@ -69,11 +71,17 @@ class Slurm:
     def run(self, args: list[str], timeout: int = 120, **kwargs) -> subprocess.CompletedProcess:
         return subprocess.run(args, capture_output=True, text=True, timeout=timeout, **kwargs)
 
-    def submit(self, script: str, args: list[str], cwd) -> str:
-        result = self.run(["sbatch", "--parsable", script, *args], cwd=cwd, env=clean_env())
-        if result.returncode != 0:
-            raise SlurmError(f"sbatch failed: {result.stderr.strip()}")
-        return result.stdout.strip().split(";")[0]
+    def submit(self, script: str, args: list[str], cwd, attempts: int = 3) -> str:
+        """Submit a job and return its ID. Try again after a timeout of the busy SLURM controller."""
+        for attempt in range(1, attempts + 1):
+            result = self.run(["sbatch", "--parsable", script, *args], cwd=cwd, env=clean_env())
+            if result.returncode == 0:
+                return result.stdout.strip().split(";")[0]
+            error = result.stderr.strip()
+            if attempt == attempts or not any(text in error for text in TRANSIENT_ERRORS):
+                raise SlurmError(f"sbatch failed: {error}")
+            self.sleep(30)
+        raise SlurmError("sbatch failed")
 
     def queue_state(self, job_id: str) -> str | None:
         """Return the state of the job in the queue, or None if the job left the queue."""

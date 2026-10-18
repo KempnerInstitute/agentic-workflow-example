@@ -6,7 +6,7 @@ import pytest
 
 from pruning_example import config, finish, loop, metrics, records
 from pruning_example.agent import AgentFormatError, tokens_used
-from pruning_example.slurm import Accounting, Slurm, parse_sacct
+from pruning_example.slurm import Accounting, Slurm, SlurmError, parse_sacct
 
 GOOD = {"sparsity": 0.98, "steps": 4, "finetune_epochs": 16, "lr": 0.02, "weight_decay": 0.0005,
         "exclude_layers": [], "reason": "test"}
@@ -227,6 +227,22 @@ def test_sacct_adds_the_runs_of_a_requeued_job():
     assert usage_record.state == "COMPLETED"
     assert usage_record.gpu_minutes == 15.0
     assert usage_record.runs == 2
+
+
+def test_sbatch_tries_again_after_a_controller_timeout():
+    class Result:
+        def __init__(self, code, out="", err=""):
+            self.returncode, self.stdout, self.stderr = code, out, err
+
+    answers = iter([Result(1, err="sbatch: error: Batch job submission failed: Socket timed out on send/recv operation"),
+                    Result(0, out="777\n")])
+    slurm = Slurm(sleep=lambda seconds: None)
+    slurm.run = lambda args, timeout=120, **kwargs: next(answers)
+    assert slurm.submit("slurm/round.sbatch", [], cwd=".") == "777"
+
+    slurm.run = lambda args, timeout=120, **kwargs: Result(1, err="sbatch: error: invalid partition specified")
+    with pytest.raises(SlurmError):
+        slurm.submit("slurm/round.sbatch", [], cwd=".")
 
 
 def test_queue_time_adds_up_over_requeues():
