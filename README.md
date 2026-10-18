@@ -35,6 +35,8 @@ uv sync --locked --extra gpu             # about 5 GB of packages
 exit
 ```
 
+`cluster.env` puts the uv cache and the Python interpreter in lab storage. The agent sandbox hides your home folder, so `.venv/bin/python` must not link to a Python in your home folder.
+
 Train the baseline:
 
 ```bash
