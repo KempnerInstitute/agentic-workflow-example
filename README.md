@@ -139,6 +139,34 @@ src/pruning_example/      code: data, model, evaluator, pruning, records, loop, 
 tests/                    pytest tests
 ```
 
+## Our run
+
+One full run on October 17, 2026. Round 1 was supervised. The loop job ran rounds 2 to 15 and stopped at the round limit.
+
+| Round | Sparsity | Steps | Epochs | Learning rate | Excluded | Validation accuracy | Weights left |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.5 | 1 | 2 | 0.01 | none | 0.9320 | 50% |
+| 2 | 0.85 | 2 | 4 | 0.01 | none | 0.9356 | 15% |
+| 3 | 0.95 | 3 | 6 | 0.01 | conv1 | 0.9180 | 5.0% |
+| 5 | 0.98 | 5 | 10 | 0.01 | conv1 | 0.9074 | 2.0% |
+| 7 | 0.988 | 5 | 20 | 0.01 | conv1 | 0.9052 | 1.2% |
+| 8 | 0.989 | 4 | 20 | 0.01 | conv1 | 0.8976 (below) | 1.1% |
+| 10 | 0.9895 | 5 | 20 | 0.03 | conv1 | 0.9154 | 1.07% |
+| 15 | 0.9927 | 5 | 20 | 0.08 | conv1 | 0.9076 | 0.75% |
+
+From round 9, the agent raised the learning rate by 0.01 in each round. This kept the threshold at higher sparsities.
+
+| Result | Value |
+|---|---|
+| Selected model | Round 15: 83,215 nonzero weights (0.75%), sparse size 1.56 MB (dense: 44.7 MB) |
+| Test accuracy | 0.9045 (95% interval 0.899 to 0.910) |
+| Confirmation round (seed 1) | Validation 0.9050, test 0.9032 |
+| Tokens | 323,072, estimated cost $1.11 |
+| GPU minutes | 16.1 for the rounds, 1.0 for the confirmation round |
+| Time of the loop job | 66 minutes |
+
+The confirmation round passed exactly at the threshold, and both test values are close to 0.900. Read the result as a lead to check, not as a finding.
+
 ## Tested with
 
 Claude Code 2.1.302, uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04, on A100, H100, H200, and RTX PRO 6000 GPUs, in October 2026.
