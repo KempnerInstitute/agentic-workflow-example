@@ -14,28 +14,40 @@ from . import config, final_eval, metrics, records
 from .agent import AgentError, tokens_used
 from .slurm import SlurmError
 
-RESULT_KEYS = ("val_accuracy", "val_interval", "nonzero", "weights_left", "sparse_size_mb", "meets_target")
+RESULT_KEYS = ("val_accuracy", "val_interval", "nonzero", "weights_left", "sparse_size_mb", "passes")
 
 
-def row_meets_target(row: dict, target: dict) -> bool:
-    """Compare a history row with the current target, not with the decision stored at the time of the round."""
-    return row["status"] == "ok" and metrics.meets_target(float(row["val_accuracy"]), int(row["nonzero"]), target)
+def row_passes(row: dict, target: dict) -> bool:
+    """Compare a history row with the current threshold, not with the decision stored at the time of the round."""
+    return row["status"] == "ok" and metrics.passes(float(row["val_accuracy"]), target)
+
+
+def best_round(history: list[dict], target: dict) -> dict | None:
+    """Return the round with the fewest weights left among the rounds that keep the threshold."""
+    passing = [row for row in history if row_passes(row, target)]
+    return min(passing, key=lambda row: int(row["nonzero"]), default=None)
+
+
+def rounds_without_improvement(history: list[dict], target: dict) -> int:
+    """Count the complete rounds since the last round that kept the threshold with fewer weights."""
+    best, count = None, 0
+    for row in history:
+        if row["status"] != "ok":
+            continue
+        if row_passes(row, target) and (best is None or int(row["nonzero"]) < best):
+            best, count = int(row["nonzero"]), 0
+        else:
+            count += 1
+    return count
 
 
 def select_round(history: list[dict], target: dict) -> dict | None:
-    """Select the round for the final steps.
-
-    Use the round that met the target. If no round met it, use the round with the fewest
-    weights left among the rounds with enough validation accuracy. If no round has enough
-    accuracy, use the round with the highest validation accuracy.
-    """
+    """Select the round for the final steps: the fewest weights left among the rounds that keep
+    the threshold. If no round keeps the threshold, select the round with the highest validation accuracy."""
+    best = best_round(history, target)
+    if best is not None:
+        return best
     ok = [row for row in history if row["status"] == "ok"]
-    met = [row for row in ok if row_meets_target(row, target)]
-    if met:
-        return min(met, key=lambda row: int(row["nonzero"]))
-    accurate = [row for row in ok if float(row["val_accuracy"]) >= target["val_accuracy"]]
-    if accurate:
-        return min(accurate, key=lambda row: int(row["nonzero"]))
     return max(ok, key=lambda row: float(row["val_accuracy"]), default=None)
 
 
@@ -83,8 +95,7 @@ def write_summary(ctx, stop_reason: str, final: bool, selected=None, confirmatio
         "claude_version": os.environ.get("CLAUDE_VERSION", "unknown"),
         "experiment_file": str(experiment_file.relative_to(ctx.paths.project)),
         "experiment_sha256": hashlib.sha256(experiment_file.read_bytes()).hexdigest(),
-        "target": {**ctx.experiment["target"],
-                   "max_nonzero": metrics.max_nonzero(ctx.experiment["target"]["size_target"])},
+        "target": ctx.experiment["target"],
         "round_attempts": len(history),
         "rounds_ok": sum(row["status"] == "ok" for row in history),
         "tokens": {

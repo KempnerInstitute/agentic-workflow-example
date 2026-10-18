@@ -9,7 +9,7 @@ import math
 
 import torch
 
-from .model import PRUNABLE_WEIGHTS, prunable_layers
+from .model import prunable_layers
 
 
 def effective_weight(module) -> torch.Tensor:
@@ -32,13 +32,9 @@ def weight_counts(model) -> dict:
     return {"total": total, "nonzero": nonzero, "weights_left": nonzero / total, "layer_density": layers}
 
 
-def max_nonzero(size_target: float) -> int:
-    """Return the largest number of nonzero prunable weights that meets the size target."""
-    return math.floor(size_target * PRUNABLE_WEIGHTS)
-
-
-def meets_target(val_accuracy: float, nonzero: int, target: dict) -> bool:
-    return val_accuracy >= target["val_accuracy"] and nonzero <= max_nonzero(target["size_target"])
+def passes(val_accuracy: float, target: dict) -> bool:
+    """Return True if a model keeps the accuracy threshold."""
+    return val_accuracy >= target["val_accuracy"]
 
 
 def sparse_size_bytes(total: int, nonzero: int) -> int:

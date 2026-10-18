@@ -2,8 +2,8 @@
 # Read this file before you start the loop job: it sets the budget of the unattended phase.
 
 target:
-  val_accuracy: 0.905        # 0.900 plus a margin for noise in 5,000 validation images
-  size_target: 0.008         # 0.8%: in calibration, iterative pruning reached 0.9074 here, one-shot 0.9006
+  val_accuracy: 0.905        # accuracy threshold: 0.900 plus a margin for noise in 5,000 validation images
+  plateau_rounds: 3          # stop after 3 rounds in a row that find no smaller model above the threshold
 
 baseline:
   epochs: 40

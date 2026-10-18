@@ -122,11 +122,12 @@ def failed_in_a_row(history: list[dict]) -> int:
 def stop_reason(ctx: Context) -> str | None:
     """Return the reason to stop before the next round, or None."""
     budget = ctx.budget
+    target = ctx.experiment["target"]
     history = records.read_history(ctx.paths.state)
-    if any(finish.row_meets_target(row, ctx.experiment["target"]) for row in history):
-        return "target"
     if len(history) >= budget["max_round_attempts"]:
         return "round_limit"
+    if finish.rounds_without_improvement(history, target) >= target["plateau_rounds"]:
+        return "plateau"
     step_limit = budget["tokens"] * (1 - budget["report_reserve_fraction"])
     next_step = ctx.ledger.largest_step or budget["step_token_estimate"]
     if ctx.ledger.tokens + next_step > step_limit:
@@ -160,11 +161,18 @@ def run_attempt(ctx: Context, round_no: int) -> None:
     state = ctx.paths.state
     records.check_integrity(ctx.paths.project)
     history = records.read_history(state)
+    target = ctx.experiment["target"]
+    best = finish.best_round(history, target)
     prompt = render(ctx.paths.project / "prompts" / "agent_step.md", {
         "STATE": state.relative_to(ctx.paths.project),
         "N": round_no,
         "R": ctx.budget["max_round_attempts"] - len(history),
         "G": round(max(0.0, ctx.budget["gpu_minutes"] - ctx.ledger.gpu_minutes)),
+        "BEST": (f"round {best['round']}, {int(best['nonzero']):,} nonzero weights "
+                 f"({100 * float(best['weights_left']):.2f}% left), validation accuracy {best['val_accuracy']}"
+                 if best else "none yet"),
+        "STALE": finish.rounds_without_improvement(history, target),
+        "PLATEAU": target["plateau_rounds"],
     })
     try:
         result = ctx.agent.run(prompt, ctx.experiment["agent_step"], ctx.schema_text)
@@ -217,7 +225,7 @@ def run_attempt(ctx: Context, round_no: int) -> None:
         return
     row = rows[-1]
     ctx.log(f"round {round_no}: val_accuracy={row['val_accuracy']} weights_left={row['weights_left']} "
-            f"meets_target={row['meets_target']} tokens={tokens} gpu_minutes={usage.gpu_minutes} "
+            f"passes={row['passes']} tokens={tokens} gpu_minutes={usage.gpu_minutes} "
             f"(totals: {ctx.ledger.tokens} tokens, {ctx.ledger.gpu_minutes:.1f} GPU minutes)")
 
 

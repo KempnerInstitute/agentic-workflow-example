@@ -14,7 +14,7 @@ from pathlib import Path
 PROTECTED_DIRS = ["src", "slurm", "configs", "prompts", ".claude"]
 HISTORY_FIELDS = [
     "round", "status", "sparsity", "steps", "finetune_epochs", "lr", "weight_decay", "exclude_layers",
-    "val_accuracy", "weights_left", "nonzero", "meets_target", "job_id", "note",
+    "val_accuracy", "weights_left", "nonzero", "passes", "job_id", "note",
 ]
 
 
@@ -148,6 +148,6 @@ def history_row(round_no: int, status: str, round_config: dict | None, result: d
             "val_accuracy": f"{result['val_accuracy']:.4f}",
             "weights_left": f"{result['weights_left']:.6f}",
             "nonzero": result["nonzero"],
-            "meets_target": "yes" if result["meets_target"] else "no",
+            "passes": "yes" if result["passes"] else "no",
         })
     return row

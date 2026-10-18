@@ -15,13 +15,10 @@ def test_prunable_weights_of_resnet18():
         assert layers[name].weight.numel() == count
 
 
-def test_target_uses_exact_weight_counts():
-    target = {"val_accuracy": 0.905, "size_target": 0.02}
-    largest = metrics.max_nonzero(0.02)
-    assert largest == 223_287
-    assert metrics.meets_target(0.905, largest, target)
-    assert not metrics.meets_target(0.905, largest + 1, target)
-    assert not metrics.meets_target(0.9049, largest, target)
+def test_accuracy_threshold():
+    target = {"val_accuracy": 0.905, "plateau_rounds": 3}
+    assert metrics.passes(0.905, target)
+    assert not metrics.passes(0.9049, target)
 
 
 def test_sparse_size_is_bitmask_plus_fp16_values():

@@ -1,13 +1,13 @@
 # Agentic Workflow Example
 
-A Claude Code agent prunes a ResNet-18 model for CIFAR-10 on the Kempner AI cluster. The goal is a small model with a test accuracy of at least 90%. The chapter "End-to-End Agentic Workflow Example" of the [Kempner Institute Computing Handbook](https://handbook.eng.kempnerinstitute.harvard.edu/) describes this example step by step.
+A Claude Code agent prunes a ResNet-18 model for CIFAR-10 on the Kempner AI cluster. The goal is the smallest model that keeps a test accuracy of at least 90%. The chapter "End-to-End Agentic Workflow Example" of the [Kempner Institute Computing Handbook](https://handbook.eng.kempnerinstitute.harvard.edu/) describes this example step by step.
 
 ## What the example does
 
 1. You train the dense baseline one time.
 2. You supervise round 1 in an interactive Claude Code session. You approve each agent action.
 3. You start the loop job. For each round, the loop script asks the agent for the next configuration, checks the configuration, submits one round job, and records the result.
-4. The loop script stops at the target or at a limit. Then it runs the final steps: a confirmation round with a second seed, a one-time test evaluation, a summary, and a draft report.
+4. The loop script stops when 3 rounds in a row find no smaller model that keeps the accuracy threshold, or at a limit. Then it runs the final steps: a confirmation round with a second seed, a one-time test evaluation, a summary, and a draft report.
 5. You review the result.
 
 In the unattended phase, the agent has read-only tools. It cannot run commands, write files, or submit jobs. The loop script, which is committed code, does these tasks.
@@ -69,7 +69,7 @@ Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv
 
 | Limit | Value |
 |---|---|
-| Target | Validation accuracy of at least 0.905, with at most 0.8% of the prunable weights left |
+| Accuracy threshold | Validation accuracy of at least 0.905. The loop looks for the fewest weights that keep it, and stops after 3 rounds in a row without a smaller passing model. |
 | Tokens | 1,000,000 for the unattended phase, with 10% kept for the report step. All four token types count, cache reads too. |
 | Agent step | `--max-turns 8`, `--max-budget-usd 1.00`, read-only tools, `dontAsk` |
 | Rounds | 15 round attempts, round 1 included |

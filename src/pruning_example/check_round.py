@@ -49,8 +49,8 @@ def run_checks(round_no: int) -> list[tuple[str, bool, str]]:
                                               round_config["steps"])[-1]
     checks.append(("configuration: expected nonzero weights", counts["nonzero"] == expected_nonzero,
                    f"expected {expected_nonzero}"))
-    decision = metrics.meets_target(result["val_accuracy"], counts["nonzero"], target)
-    checks.append(("target decision", decision == result["meets_target"], f"meets_target={decision}"))
+    decision = metrics.passes(result["val_accuracy"], target)
+    checks.append(("accuracy threshold decision", decision == result["passes"], f"passes={decision}"))
     return checks
 
 

@@ -4,8 +4,9 @@ This project prunes ResNet-18 on CIFAR-10 on the Kempner AI cluster. Read this f
 
 ## All sessions
 
-- **Goal.** Reach the target with the fewest weights left.
-- **Target.** Validation accuracy of at least 0.905, and at most floor(size_target x 11,164,352) nonzero prunable weights. `experiment.yaml` gives `size_target`.
+- **Goal.** Find the configuration with the fewest weights left that keeps the accuracy threshold.
+- **Accuracy threshold.** Validation accuracy of at least 0.905 (`target.val_accuracy` in `experiment.yaml`). A round that keeps it passes.
+- **Stop.** The loop script stops after `target.plateau_rounds` complete rounds in a row that find no passing model with fewer weights, or at a limit.
 - **Prunable weights.** The 20 Conv2d layers and the Linear layer: 11,164,352 weights. `conv1` has 1,728 weights, and `fc` has 5,120. Excluded layers stay dense, and they still count.
 - **Weights left.** Nonzero prunable weights divided by 11,164,352. With sparsity s and no excluded layers, a round keeps 11,164,352 - ceil(11,164,352 x s) weights.
 - **A round.** The round job prunes in `steps` equal-ratio steps with global magnitude pruning, and it fine-tunes after each step. The learning rate restarts at `lr` in each fine-tuning block and decays with a cosine curve.

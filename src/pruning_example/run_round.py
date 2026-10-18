@@ -135,8 +135,7 @@ def main(argv=None) -> None:
         "val_interval": metrics.wilson_interval(val_accuracy, len(val)),
         "val_images": len(val),
         **counts,
-        "max_nonzero": metrics.max_nonzero(target["size_target"]),
-        "meets_target": metrics.meets_target(val_accuracy, counts["nonzero"], target),
+        "passes": metrics.passes(val_accuracy, target),
         "sparse_size_mb": round(metrics.sparse_size_bytes(counts["total"], counts["nonzero"]) / 1e6, 3),
         "dense_size_mb": round(4 * counts["total"] / 1e6, 3),
         "finetune_minutes_this_run": round((time.time() - began) / 60, 2),
@@ -151,7 +150,7 @@ def main(argv=None) -> None:
     finish_records(paths, args, round_no, record_dir, round_config)
     checkpoint.unlink(missing_ok=True)
     print(f"round {round_no}: val_accuracy={val_accuracy:.4f} weights_left={counts['weights_left']:.6f} "
-          f"nonzero={counts['nonzero']} meets_target={result['meets_target']}", flush=True)
+          f"nonzero={counts['nonzero']} passes={result['passes']}", flush=True)
 
 
 if __name__ == "__main__":
