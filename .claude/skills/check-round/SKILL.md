@@ -17,7 +17,7 @@ The command compares:
 - The validation accuracy with the round log in `logs/`.
 - The nonzero weights with a new count from the checkpoint.
 - The nonzero weights with the count that the configuration gives.
-- The target decision with the target in `experiment.yaml`.
+- The pass decision with the accuracy threshold in `experiment.yaml`.
 
 Report each line that starts with `DIFF`. If all lines start with `OK`, say that the records agree.
 

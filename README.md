@@ -101,8 +101,32 @@ The round checkpoints are in `RUN_ROOT` on scratch storage. FASRC deletes scratc
 | Writes | The agent asks first. Deny rules block edits of tracked files and output folders. | None |
 | Shell | Sandbox on, SLURM commands outside it, `scancel` and `rm -r` blocked by a hook | No shell |
 | Job submission | `sbatch` asks | The loop script submits |
-| Reads | Only the project folder | The same |
+| Reads | File tools: only the project folder. Sandboxed commands: not the home folder. | Only the project folder |
 | Integrity | The round job and the loop script stop if a tracked file changed | The same |
+
+## Skills
+
+The project has three skills in `.claude/skills/`. Claude Code loads a skill when a task needs it, or when you type its name with a slash, for example `/check-round 1`.
+
+| Skill | Source | Use |
+|---|---|---|
+| `check-round` | Written for this project | Checks the records of one round. It runs `.venv/bin/python -m pruning_example.check_round N`, which compares the metrics, the history row, and the round log, and counts the weights in the checkpoint again. |
+| `reproducible-research` | The Coding Agent Skills page of the handbook | Practices for run records, seeds, environments, and data. Useful when you change the code. |
+| `testing-and-continuous-integration` | The Coding Agent Skills page of the handbook | Practices for tests and CI. Useful when you change the code or the tests. |
+
+- In this example, only the interactive session of round 1 can use the skills. The agent step in the loop has only the Read, Grep, and Glob tools, so it cannot load a skill.
+- In our run, round 1 used `check-round`. The rounds did not use the two handbook skills.
+- Read each skill before you trust the project folder, because Claude Code follows its instructions.
+
+To update the two handbook skills, download them again, and commit the change. The round job stops if a tracked file changed.
+
+```bash
+base=https://handbook.eng.kempnerinstitute.harvard.edu/skills
+for skill in reproducible-research testing-and-continuous-integration; do
+  curl -fsSL "$base/$skill/SKILL.md" -o ".claude/skills/$skill/SKILL.md"
+done
+git diff --stat .claude/skills
+```
 
 ## Test the loop with small limits
 
@@ -114,7 +138,7 @@ cp experiment.yaml local/small.yaml       # then lower the limits in the copy
 STATE_DIR=local/state_small EXPERIMENT_FILE=local/small.yaml sbatch slurm/loop.sbatch
 ```
 
-The loop needs a round 1 in the state folder. `state/summary.json` records the experiment file and its hash.
+The loop needs a round 1 in the state folder. The summary in the state folder records the experiment file and its hash.
 
 ## Tests
 
@@ -128,7 +152,7 @@ The tests use generated images, so they need no GPU and no data. CI runs them wi
 
 ```text
 AGENTS.md, CLAUDE.md      agent instructions
-experiment.yaml           target, recipe, and limits
+experiment.yaml           accuracy threshold, recipe, and limits
 cluster.env.example       your account and paths
 .claude/                  settings, hook, and skills
 configs/                  round configuration schema and an example
@@ -173,7 +197,7 @@ Claude Code 2.1.302, uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, t
 
 ## Adapt the example
 
-- **Change** the task: the data, the model, the metric, the round configuration schema, the target, and the limits.
+- **Change** the task: the data, the model, the metric, the round configuration schema, the accuracy threshold, and the limits.
 - **Keep** the fixed evaluator, the read-only agent step, the loop script that submits the jobs, the limits outside the model, the run records, the confirmation round, and the one-time test evaluation.
 
 ## Sources
