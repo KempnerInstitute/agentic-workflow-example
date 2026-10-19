@@ -1,6 +1,6 @@
 # Agentic Workflow Example
 
-A Claude Code agent prunes a ResNet-18 model for CIFAR-10 on the Kempner AI cluster. The goal is the smallest model that keeps a test accuracy of at least 90%. The chapter "End-to-End Agentic Workflow Example" of the [Kempner Institute Computing Handbook](https://handbook.eng.kempnerinstitute.harvard.edu/) describes this example step by step.
+A Claude Code agent prunes a ResNet-18 model for CIFAR-10 on the Kempner AI cluster. The goal is the smallest model that keeps a test accuracy of at least 90%. The chapter [End-to-End Agentic Workflow Example](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/end_to_end_example.html) of the [Kempner Institute Computing Handbook](https://handbook.eng.kempnerinstitute.harvard.edu/) describes this example step by step.
 
 ## What the example does
 
