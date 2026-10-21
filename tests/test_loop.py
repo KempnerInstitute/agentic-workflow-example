@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from pruning_example import config, finish, loop, metrics, records
-from pruning_example.agent import AgentFormatError, tokens_used
+from pruning_example.agent import (
+    AgentFormatError, ModelCheckError, UNATTENDED_SETTINGS, check_model, command, step_env, tokens_used,
+)
 from pruning_example.slurm import Accounting, Slurm, SlurmError, parse_sacct
 
 GOOD = {"sparsity": 0.98, "steps": 4, "finetune_epochs": 16, "lr": 0.02, "weight_decay": 0.0005,
@@ -98,6 +102,8 @@ def context(project, agent, slurm, plateau_rounds: int = 100, **budget) -> loop.
     experiment = config.load_experiment(project)
     experiment["target"] = {**TARGET, "plateau_rounds": plateau_rounds}
     experiment["budget"].update(budget)
+    for step in ("agent_step", "report_step"):  # the fake agent reports model-a; test_model_check covers the check
+        experiment[step].pop("model", None)
     return loop.Context(paths=paths, experiment=experiment, schema_text=(project / config.SCHEMA_PATH).read_text(),
                         agent=agent, slurm=slurm, ledger=loop.Ledger(paths.state / "ledger.tsv"),
                         log=lambda message: None)
@@ -308,3 +314,66 @@ def test_sigterm_in_the_final_steps_keeps_the_stop_reason(started, monkeypatch):
     assert summary["stop_reason"] == "plateau"  # --finish can use it later
     assert summary["terminated"] is True
     assert summary["final_steps_done"] is False
+
+
+def test_model_check_stops_the_loop(started):
+    ctx = context(started, FakeAgent(lambda call: GOOD), FakeSlurm(started / "state", lambda n: (0.91, SMALL)))
+    ctx.experiment["agent_step"]["model"] = "claude-opus-5-5"  # the fake agent reports model-a
+    assert loop.run_rounds(ctx) == "model_check"
+    assert ctx.ledger.tokens == 50_000  # the step still counts
+
+
+def test_check_model_skips_aliases_and_accepts_suffixes():
+    result = {"modelUsage": {"claude-opus-5-5[1m]": {}, "claude-haiku-4-5": {}}}
+    check_model(result, "claude-opus-5-5")
+    check_model(result, "opus")  # an alias names no fixed model
+    check_model(result, None)
+    with pytest.raises(ModelCheckError, match="not the configured model claude-sonnet-5-5"):
+        check_model(result, "claude-sonnet-5-5")
+
+
+def test_gpu_reservation_starts_a_round_only_if_its_time_limit_fits(started):
+    slurm = FakeSlurm(started / "state", lambda n: (0.89, SMALL), gpu_minutes=8.0)
+    ctx = context(started, FakeAgent(lambda call: GOOD), slurm, gpu_minutes=60, gpu_reservation=True)
+    assert loop.run_rounds(ctx) == "gpu_budget"
+    assert ctx.ledger.gpu_minutes == 56.0  # 48 + 10 fitted in 60; 56 + 10 does not
+    ctx = context(started, FakeAgent(lambda call: GOOD), slurm, gpu_minutes=60)
+    assert loop.stop_reason(ctx) is None  # the rule of chapter 28 starts one more round, because 56 is below 60
+
+
+def test_the_ledger_of_chapter_28_keeps_its_columns(tmp_path):
+    ledger = loop.Ledger(tmp_path / "ledger.tsv")
+    ledger.add(round=2, kind="agent_step", tokens=100, wave=1, model="m")
+    assert (tmp_path / "ledger.tsv").read_text().splitlines()[0].split("\t") == loop.LEDGER_FIELDS
+    assert ledger.tokens == 100
+
+
+def test_command_adds_the_model_the_effort_the_role_prompt_and_the_readme_rule():
+    caps = {"max_turns": 8, "max_budget_usd": 1.0, "timeout_minutes": 15}
+    args = command("prompt", caps)
+    assert "--model" not in args and "--effort" not in args and "--append-system-prompt-file" not in args
+    assert json.loads(args[args.index("--settings") + 1]) == UNATTENDED_SETTINGS
+    assert "Read(./README.md)" in UNATTENDED_SETTINGS["permissions"]["deny"]
+    args = command("prompt", {**caps, "model": "claude-opus-5-5", "effort": "xhigh",
+                              "role_prompt": "prompts/multi/roles/planner.md"}, schema_text="{}")
+    assert args[args.index("--model") + 1] == "claude-opus-5-5"
+    assert args[args.index("--effort") + 1] == "xhigh"
+    assert args[args.index("--append-system-prompt-file") + 1] == "prompts/multi/roles/planner.md"
+    assert args[-2:] == ["--json-schema", "{}"]
+
+
+def test_the_effort_variable_is_removed_only_when_the_step_sets_an_effort(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "low")  # it would override --effort
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "not-a-real-key")
+    assert "CLAUDE_CODE_EFFORT_LEVEL" not in step_env({"effort": "high"})
+    assert step_env({})["CLAUDE_CODE_EFFORT_LEVEL"] == "low"
+    assert "ANTHROPIC_API_KEY" not in step_env({}) and "ANTHROPIC_API_KEY" not in step_env({"effort": "high"})
+
+
+def test_record_paths_of_confirmation_seeds(tmp_path):
+    assert records.record_dir(tmp_path, "round", 7) == tmp_path / "rounds" / "round_07"
+    assert records.record_dir(tmp_path, "confirm", 7) == tmp_path / "confirm" / "round_07"
+    assert records.record_dir(tmp_path, "confirm", 7, 1) == tmp_path / "confirm" / "round_07"
+    assert records.record_dir(tmp_path, "confirm", 7, 2) == tmp_path / "confirm" / "round_07_seed2"
+    assert records.test_eval_path(tmp_path, "confirm", 7, 2) == tmp_path / "test_eval" / "confirm_07_seed2.json"
+    assert records.test_eval_path(tmp_path, "round", 7) == tmp_path / "test_eval" / "round_07.json"

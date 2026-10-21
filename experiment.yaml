@@ -29,11 +29,15 @@ budget:
   final_reserve_minutes: 65  # time kept for the final steps
 
 agent_step:
+  model: claude-opus-5-5     # a full model name; an alias such as opus moves to newer models
+  effort: medium             # low, medium, high, xhigh, or max; medium is the default of Opus 5.5
   max_turns: 8
   max_budget_usd: 1.00
   timeout_minutes: 15
 
 report_step:
+  model: claude-opus-5-5
+  effort: medium
   max_turns: 6
   max_budget_usd: 1.00
   timeout_minutes: 15

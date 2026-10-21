@@ -21,12 +21,14 @@ from datetime import datetime
 from pathlib import Path
 
 from . import config, finish, records
-from .agent import Agent, AgentError, AgentFormatError, tokens_used
+from .agent import Agent, AgentError, AgentFormatError, ModelCheckError, check_model, tokens_used
 from .config import ConfigError
 from .records import IntegrityError
 from .slurm import Slurm, SlurmError
 
 LEDGER_FIELDS = ["time", "round", "kind", "status", "tokens", "cost_usd", "job_id", "gpu_minutes", "slurm_state"]
+TOKEN_KINDS = frozenset({"agent_step", "report"})  # the rows of the ledger that hold tokens
+STEP_KINDS = frozenset({"agent_step"})  # the rows that decide the next round
 
 
 class Terminated(Exception):
@@ -48,10 +50,16 @@ def log(message: str) -> None:
 
 
 class Ledger:
-    """The budget record in state/ledger.tsv: tokens of each claude -p call and GPU minutes of each job."""
+    """The budget record in state/ledger.tsv: tokens of each claude -p call and GPU minutes of each job.
 
-    def __init__(self, path: Path):
+    The multi-agent loop gives its own columns and the kinds of its role steps.
+    """
+
+    def __init__(self, path: Path, fields: list[str] = LEDGER_FIELDS, token_kinds=TOKEN_KINDS, step_kinds=STEP_KINDS):
         self.path = path
+        self.fields = list(fields)
+        self.token_kinds = frozenset(token_kinds)
+        self.step_kinds = frozenset(step_kinds)
         self.rows = []
         if path.exists():
             with open(path, newline="") as f:
@@ -62,31 +70,31 @@ class Ledger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         new = not self.path.exists()
         with open(self.path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=LEDGER_FIELDS, delimiter="\t", extrasaction="ignore")
+            writer = csv.DictWriter(f, fieldnames=self.fields, delimiter="\t", extrasaction="ignore")
             if new:
                 writer.writeheader()
-            writer.writerow({name: row.get(name, "") for name in LEDGER_FIELDS})
-        self.rows.append({name: str(row.get(name, "")) for name in LEDGER_FIELDS})
+            writer.writerow({name: row.get(name, "") for name in self.fields})
+        self.rows.append({name: str(row.get(name, "")) for name in self.fields})
 
-    def total(self, column: str, kinds: set[str]) -> float:
+    def total(self, column: str, kinds) -> float:
         return sum(float(row[column] or 0) for row in self.rows if row["kind"] in kinds)
 
     @property
     def tokens(self) -> int:
-        return int(self.total("tokens", {"agent_step", "report"}))
+        return int(self.total("tokens", self.token_kinds))
 
     @property
     def largest_step(self) -> int:
-        return max((int(float(row["tokens"] or 0)) for row in self.rows if row["kind"] == "agent_step"), default=0)
+        return max((int(float(row["tokens"] or 0)) for row in self.rows if row["kind"] in self.step_kinds), default=0)
 
     @property
     def gpu_minutes(self) -> float:
-        """GPU minutes of the unattended rounds. The confirmation round is separate."""
+        """GPU minutes of the unattended rounds. The confirmation rounds are separate."""
         return self.total("gpu_minutes", {"round"})
 
     @property
     def cost_usd(self) -> float:
-        return self.total("cost_usd", {"agent_step", "report"})
+        return self.total("cost_usd", self.token_kinds)
 
 
 @dataclass
@@ -132,7 +140,10 @@ def stop_reason(ctx: Context) -> str | None:
     next_step = ctx.ledger.largest_step or budget["step_token_estimate"]
     if ctx.ledger.tokens + next_step > step_limit:
         return "token_budget"
-    if ctx.ledger.gpu_minutes >= budget["gpu_minutes"]:
+    if budget.get("gpu_reservation"):  # start a round only if its full time limit fits in the budget
+        if ctx.ledger.gpu_minutes + ctx.experiment["round"]["time_minutes"] > budget["gpu_minutes"]:
+            return "gpu_budget"
+    elif ctx.ledger.gpu_minutes >= budget["gpu_minutes"]:
         return "gpu_budget"
     if failed_in_a_row(history) >= budget["max_failed_in_a_row"]:
         return "failed_attempts"
@@ -148,6 +159,14 @@ def render(path: Path, values: dict) -> str:
     for key, value in values.items():
         text = text.replace("{" + key + "}", str(value))
     return text
+
+
+def describe_best(best: dict | None) -> str:
+    """Describe the best round so far for a prompt."""
+    if not best:
+        return "none yet"
+    return (f"round {best['round']}, {int(best['nonzero']):,} nonzero weights "
+            f"({100 * float(best['weights_left']):.2f}% left), validation accuracy {best['val_accuracy']}")
 
 
 def fail(ctx: Context, round_no: int, status: str, note: str, round_config: dict | None = None) -> None:
@@ -168,9 +187,7 @@ def run_attempt(ctx: Context, round_no: int) -> None:
         "N": round_no,
         "R": ctx.budget["max_round_attempts"] - len(history),
         "G": round(max(0.0, ctx.budget["gpu_minutes"] - ctx.ledger.gpu_minutes)),
-        "BEST": (f"round {best['round']}, {int(best['nonzero']):,} nonzero weights "
-                 f"({100 * float(best['weights_left']):.2f}% left), validation accuracy {best['val_accuracy']}"
-                 if best else "none yet"),
+        "BEST": describe_best(best),
         "STALE": finish.rounds_without_improvement(history, target),
         "PLATEAU": target["plateau_rounds"],
     })
@@ -186,6 +203,7 @@ def run_attempt(ctx: Context, round_no: int) -> None:
     tokens = tokens_used(result)
     ctx.ledger.add(round=round_no, kind="agent_step", status=result.get("subtype", ""),
                    tokens=tokens, cost_usd=result.get("total_cost_usd", 0))
+    check_model(result, ctx.experiment["agent_step"].get("model"))
 
     round_config = result.get("structured_output")
     try:
@@ -245,6 +263,21 @@ def run_rounds(ctx: Context) -> str:
         except AgentFormatError as error:
             ctx.log(f"{error}. Check the Claude Code version.")
             return "agent_format"
+        except ModelCheckError as error:
+            ctx.log(f"{error}. Check which models your organization allows.")
+            return "model_check"
+
+
+def check_time_lines(ctx: Context, scripts: tuple[str, ...]) -> None:
+    """Refuse to start if the --time line of a round job script does not agree with round.time_minutes."""
+    experiment_file = config.experiment_path(ctx.paths.project).relative_to(ctx.paths.project)
+    for script in scripts:
+        text = (ctx.paths.project / script).read_text()
+        match = re.search(r"^#SBATCH --time=(\d+):(\d+):(\d+)", text, re.M)
+        minutes = int(match.group(1)) * 60 + int(match.group(2)) if match else None
+        if minutes != ctx.experiment["round"]["time_minutes"]:
+            raise SystemExit(f"{script} has --time of {minutes} minutes, but {experiment_file} "
+                             f"has round.time_minutes {ctx.experiment['round']['time_minutes']}.")
 
 
 def check_start(ctx: Context) -> None:
@@ -254,11 +287,8 @@ def check_start(ctx: Context) -> None:
         raise SystemExit("There is no baseline. Run 'sbatch slurm/baseline.sbatch' first.")
     if not (ctx.paths.state / "rounds" / "round_01" / "metrics.json").exists():
         raise SystemExit("There is no round 1. Run the supervised round first.")
-    match = re.search(r"^#SBATCH --time=(\d+):(\d+):(\d+)", (project / "slurm" / "round.sbatch").read_text(), re.M)
-    minutes = int(match.group(1)) * 60 + int(match.group(2)) if match else None
-    if minutes != ctx.experiment["round"]["time_minutes"]:
-        raise SystemExit(f"slurm/round.sbatch has --time of {minutes} minutes, but experiment.yaml "
-                         f"has round.time_minutes {ctx.experiment['round']['time_minutes']}.")
+    several_seeds = len(finish.confirmation_seeds(ctx.experiment)) > 1  # their confirmation rounds run as an array job
+    check_time_lines(ctx, ("slurm/round.sbatch",) + (("slurm/round_array.sbatch",) if several_seeds else ()))
     records.check_integrity(project)
     notes = ctx.paths.state / "notes.md"
     if not notes.exists():
