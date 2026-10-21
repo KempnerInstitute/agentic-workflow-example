@@ -19,6 +19,12 @@ The command compares:
 - The nonzero weights with the count that the configuration gives.
 - The pass decision with the accuracy threshold in `experiment.yaml`.
 
+For a round of the multi-agent loop, set the state folder and the experiment file first:
+
+```bash
+STATE_DIR=state_multi EXPERIMENT_FILE=experiment_multi.yaml .venv/bin/python -m pruning_example.check_round $ARGUMENTS
+```
+
 Report each line that starts with `DIFF`. If all lines start with `OK`, say that the records agree.
 
 Do not change any file. If a check fails, do not try to repair the records. Tell the user which check failed.

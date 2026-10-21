@@ -1,0 +1,1 @@
+Read {STATE}/summary.json, {STATE}/history.tsv, {STATE}/hypotheses.tsv, and {STATE}/notes.md. Write a short report in Markdown: the result, the path of the waves, what the critic changed, and the limits used. Use only numbers from these files. Do not try to run commands or write files.

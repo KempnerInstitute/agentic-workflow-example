@@ -1,0 +1,67 @@
+# Settings and limits of the multi-agent design.
+# Read this file before you start the multi-agent loop job: it sets the roles, the models, the effort levels,
+# and the budget. The sections target (val_accuracy), baseline, and round must agree with experiment.yaml;
+# a test checks this.
+
+target:
+  val_accuracy: 0.905        # accuracy threshold: 0.900 plus a margin for noise in 5,000 validation images
+  test_accuracy: 0.900       # the goal on the test set; the 3-seed means in the summary use it
+  plateau_rounds: 6          # stop after 6 complete rounds in a row, in round order, without a smaller passing model
+
+baseline:
+  epochs: 40
+  lr: 0.1
+  warmup_epochs: 2
+  momentum: 0.9
+  weight_decay: 5.0e-4
+  batch_size: 256
+
+round:
+  batch_size: 256
+  momentum: 0.9
+  time_minutes: 10           # must agree with --time in slurm/round.sbatch and slurm/round_array.sbatch
+
+wave:
+  size: 3                    # configurations in each wave; fewer when a limit allows fewer
+  max_parallel: 3            # round jobs of one wave that can run at the same time
+
+# One model and one effort level for each role. Use full model names: an alias such as opus moves to newer models.
+# Effort levels: low, medium, high, xhigh, max. A checker uses a different model from the role that it checks.
+roles:
+  planner:                   # plans each wave, and runs the revision of rejected configurations
+    model: claude-opus-5-5
+    effort: xhigh
+    max_turns: 10
+    max_budget_usd: 3.00
+    timeout_minutes: 20
+  critic:                    # checks each plan before any GPU job runs; enabled: false gives one agent with waves
+    enabled: true
+    model: claude-sonnet-5-5
+    effort: high
+    max_turns: 8
+    max_budget_usd: 1.00
+    timeout_minutes: 15
+  writer:                    # writes the draft report
+    model: claude-sonnet-5-5
+    effort: medium
+    max_turns: 6
+    max_budget_usd: 1.00
+    timeout_minutes: 15
+  auditor:                   # checks each claim of the draft report against the records
+    model: claude-opus-5-5
+    effort: max
+    max_turns: 12
+    max_budget_usd: 5.00
+    timeout_minutes: 30
+
+budget:
+  tokens: 1000000            # all four token types of all models, cache reads included, supervised wave included
+  final_reserve_fraction: 0.20   # kept for the writer and the auditor; the search can use the rest
+  wave_token_estimate: 150000    # used before the first measured wave; then the largest wave so far
+  gpu_minutes: 60            # rounds after round 1; failed and requeued runs count
+  max_round_attempts: 45     # round 1 included; all agents of a run share them
+  max_failed_waves: 2        # waves in a row with no complete round
+  queue_limit_minutes: 45    # total queue time of one array job, requeues included
+  final_reserve_minutes: 110 # time kept for the final steps
+
+confirmation_seeds: [1, 2]   # the selected configuration runs again with each seed, as one array job

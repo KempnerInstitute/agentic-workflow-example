@@ -1,0 +1,60 @@
+{
+  "title": "Audit of a draft report",
+  "type": "object",
+  "properties": {
+    "claims": {
+      "type": "array",
+      "description": "Each claim of the report that has a number or a conclusion.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string",
+            "maxLength": 400,
+            "description": "The claim, as the report states it."
+          },
+          "verdict": {
+            "enum": [
+              "supported",
+              "wrong",
+              "unsupported"
+            ],
+            "description": "supported: the records show it. wrong: the records show something else. unsupported: the records do not show it."
+          },
+          "evidence": {
+            "type": "string",
+            "maxLength": 400,
+            "description": "The file and the value that decide the verdict."
+          },
+          "correction": {
+            "type": "string",
+            "maxLength": 400,
+            "description": "The correct value for a wrong claim; empty otherwise."
+          }
+        },
+        "required": [
+          "claim",
+          "verdict",
+          "evidence",
+          "correction"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "limits_stated": {
+      "type": "boolean",
+      "description": "True if the report states the seeds, the intervals, the one test evaluation, and the number of runs."
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 800,
+      "description": "Your audit in a few sentences."
+    }
+  },
+  "required": [
+    "claims",
+    "limits_stated",
+    "summary"
+  ],
+  "additionalProperties": false
+}

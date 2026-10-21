@@ -1,0 +1,1 @@
+Check the draft report {REPORT} against the records in {STATE}: summary.json, history.tsv, hypotheses.tsv if it exists, the metrics.json files in rounds/ and confirm/, and the files in test_eval/. Give a verdict for each claim. Return the result in the required JSON format.
