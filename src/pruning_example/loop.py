@@ -228,7 +228,7 @@ def run_attempt(ctx: Context, round_no: int) -> None:
     outcome = ctx.slurm.wait(job, 60 * ctx.budget["queue_limit_minutes"])
     if outcome == "queue_limit":
         ctx.slurm.cancel(job)
-    usage = ctx.slurm.accounting(job)
+    usage = finish.job_accounting(ctx, job)
     (state / "current_job").unlink(missing_ok=True)
     ctx.ledger.add(round=round_no, kind="round", status=outcome, job_id=job,
                    gpu_minutes=usage.gpu_minutes, slurm_state=usage.state)

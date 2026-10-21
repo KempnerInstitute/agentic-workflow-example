@@ -5,7 +5,8 @@ Usage: python -m pruning_example.check_report [REPORT]
 The command lists each number of the report that it cannot find in the records. It checks each number
 with a decimal point, each percentage, and each whole number of 4 or more digits. It skips small whole
 numbers, such as round numbers and seeds, and years. A record value matches if the report number is
-a rounding of it, also after a factor of 100 for percentages. The list is a hint for you, not a verdict:
+a rounding of it, and a percentage matches if it is a rounding of 100 times a record value. The sign
+counts. The list is a hint for you, not a verdict:
 a correct number can be missing from the records, for example a difference of two values.
 """
 
@@ -19,8 +20,8 @@ from pathlib import Path
 
 from . import config
 
-# A number in prose: 83,215 or 0.9076 or 0.75%. Version numbers such as 2.1.302 do not match.
-NUMBER = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(%?)(?!\.\d)")
+# A number in prose: 83,215 or 0.9076 or -0.0123 or 0.75%. Version numbers such as 2.1.302 do not match.
+NUMBER = re.compile(r"(?<![\w.])(-?)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(%?)(?!\.\d)")
 TABLES = ("history.tsv", "hypotheses.tsv", "ledger.tsv")
 JSON_GLOBS = ("summary.json", "rounds/*/metrics.json", "confirm/*/metrics.json", "test_eval/*.json")
 
@@ -62,11 +63,13 @@ def record_values(state: Path) -> list[float]:
     return found
 
 
-def matches(whole: str, fraction: str | None, values: list[float]) -> bool:
-    """Return True if the number is a rounding of a record value, or of 100 times a record value."""
-    number = float(whole.replace(",", "") + ("." + fraction if fraction else ""))
+def matches(sign: str, whole: str, fraction: str | None, percent: str, values: list[float]) -> bool:
+    """Return True if the number is a rounding of a record value. A percentage must be a rounding of
+    100 times a record value, so a fraction written as a percentage does not match."""
+    number = float(sign + whole.replace(",", "") + ("." + fraction if fraction else ""))
     half_step = 0.5 * 10 ** -(len(fraction) if fraction else 0) + 1e-12
-    return any(abs(value - number) <= half_step or abs(100 * value - number) <= half_step for value in values)
+    factor = 100 if percent else 1
+    return any(abs(factor * value - number) <= half_step for value in values)
 
 
 def checked(whole: str, fraction: str | None, percent: str) -> bool:
@@ -76,7 +79,8 @@ def checked(whole: str, fraction: str | None, percent: str) -> bool:
     if fraction or percent:
         return True
     digits = whole.replace(",", "")
-    return len(digits) >= 4 and not (len(digits) == 4 and 1900 <= int(digits) <= 2100)  # skip years
+    is_year = "," not in whole and len(digits) == 4 and 1900 <= int(digits) <= 2100
+    return len(digits) >= 4 and not is_year
 
 
 def unmatched_numbers(text: str, state: Path) -> list[dict]:
@@ -85,8 +89,8 @@ def unmatched_numbers(text: str, state: Path) -> list[dict]:
     missing = []
     for line_no, line in enumerate(text.splitlines(), 1):
         for match in NUMBER.finditer(line):
-            whole, fraction, percent = match.groups()
-            if checked(whole, fraction, percent) and not matches(whole, fraction, values):
+            sign, whole, fraction, percent = match.groups()
+            if checked(whole, fraction, percent) and not matches(sign, whole, fraction, percent, values):
                 missing.append({"number": match.group(0), "line": line_no})
     return missing
 

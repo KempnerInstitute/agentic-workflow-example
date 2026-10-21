@@ -103,3 +103,11 @@ def test_array_accounting_does_not_raise_without_records():
     slurm = Slurm(sleep=lambda seconds: None)
     slurm.run = lambda args, timeout=120, **kwargs: Result(1, err="sacct: error")
     assert slurm.array_accounting("500", 2, attempts=3) == {}
+
+
+def test_a_canceled_waiting_run_after_a_requeue_is_the_last_run():
+    text = (f"500_0|501|REQUEUED|2026-10-21T10:00:00|300|{TRES}\n"
+            "500_0|501|CANCELLED by 123|Unknown|0|\n")  # the queue limit canceled the requeued, waiting run
+    task = parse_array_sacct(text)[0]
+    assert task.state == "CANCELLED"
+    assert task.gpu_minutes == 5.0 and task.runs == 1

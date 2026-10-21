@@ -214,7 +214,7 @@ def test_plan_only_writes_the_plan_and_runs_no_job(multi):
 
 def test_the_loop_refuses_to_start_without_a_planned_wave_1(multi):
     ctx = context(multi, FakeRoles(), FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL)))
-    with pytest.raises(SystemExit, match="Wave 1 has no plan"):
+    with pytest.raises(SystemExit, match="Wave 1 has no accepted configuration"):
         multi_loop.run(ctx, "loop")
 
 
@@ -542,3 +542,89 @@ def test_a_new_loop_job_cancels_the_array_job_of_a_stopped_one(multi):
     multi_loop.check_start(ctx)
     assert slurm.canceled == ["812"]
     assert not (state_of(multi) / "current_job").exists()
+
+
+# Fixes after the code review
+
+def test_the_loop_refuses_an_empty_plan_of_wave_1(multi):
+    ctx = context(multi, FakeRoles(reject=lambda kind, entry: "no"), FakeArraySlurm(state_of(multi), lambda n, kind, seed: None))
+    ctx.plan_only = True
+    assert multi_loop.run(ctx, "plan_only") == 1  # the critic rejects each configuration, also after the revision
+    assert records.read_json(state_of(multi) / "waves" / "wave_01" / "accepted.json") == []
+    assert multi_loop.run(ctx, "plan_only") == 1  # a second --plan-only job says to plan again
+    ctx = context(multi, FakeRoles(), FakeArraySlurm(state_of(multi), lambda n, kind, seed: None))
+    with pytest.raises(SystemExit, match="no accepted configuration"):
+        multi_loop.run(ctx, "loop")
+
+
+def test_finish_closes_the_wave_of_a_stopped_loop_job(multi):
+    slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL - n) if n in (2, 3) or kind == "confirm" else None)
+    planner = context(multi, FakeRoles(), slurm)
+    planner.plan_only = True
+    assert multi_loop.run(planner, "plan_only") == 0
+    ctx = context(multi, FakeRoles(), slurm)
+    multi_loop.check_start(ctx)
+    accepted = records.read_json(state_of(multi) / "waves" / "wave_01" / "accepted.json")
+    # The loop job submits wave 1 and gets SIGKILL: no handler runs, so current_job stays.
+    original_wait = slurm.wait_array
+    slurm.wait_array = lambda job, limit: (_ for _ in ()).throw(KeyboardInterrupt())
+    with pytest.raises(KeyboardInterrupt):
+        multi_loop.submit_wave(ctx, 1, accepted)
+    slurm.wait_array = original_wait
+    assert (state_of(multi) / "current_job").exists()
+    ctx = context(multi, FakeRoles(), slurm)
+    assert multi_loop.run(ctx, "finish") == 0
+    assert slurm.canceled == ["900"]  # the array job of the stopped loop job
+    outcome = records.read_json(state_of(multi) / "waves" / "wave_01" / "outcome.json")
+    assert outcome["complete_rounds"] == 2
+    statuses = [row["status"] for row in records.read_history(state_of(multi))]
+    assert statuses == ["ok", "ok", "ok", "job_failed"]
+    assert [row["kind"] for row in ctx.ledger.rows if row["kind"] == "round"] == ["round"] * 3  # GPU minutes counted
+
+
+def test_a_writer_with_another_model_does_not_stop_the_code_checks(multi):
+    slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL - n) if kind == "round" else (0.906, SMALL))
+    agent = FakeRoles(models={"writer": "claude-haiku-4-5"})
+    ctx, code = plan_then_run(multi, agent, slurm, max_round_attempts=4)
+    assert code == 0
+    audit = records.read_json(state_of(multi) / "audit.json")
+    assert "not the configured model" in audit["failures"]["writer"]
+    assert audit["failures"]["auditor"] == "skipped: there is no report"
+    assert audit["auditor_step_failed"] is True
+    assert audit["check_round"]["round"] == 4  # the code checks still ran
+    assert records.read_json(state_of(multi) / "summary.json")["audit"]["failures"]["writer"]
+
+
+def test_an_audit_without_structured_output_is_a_failed_audit(multi):
+    class NoAudit(FakeRoles):
+        def run(self, prompt, caps, schema_text=None):
+            result = super().run(prompt, caps, schema_text)
+            if Path(caps["role_prompt"]).stem == "auditor":
+                result.pop("structured_output")
+                result["subtype"] = "error_max_turns"
+            return result
+
+    slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL - n) if kind == "round" else (0.906, SMALL))
+    plan_then_run(multi, NoAudit(), slurm, max_round_attempts=4)
+    audit = records.read_json(state_of(multi) / "audit.json")
+    assert audit["auditor_step_failed"] is True
+    assert audit["failures"]["auditor"] == "no valid audit (subtype error_max_turns)"
+
+
+def test_critic_counts_count_each_configuration_one_time(multi):
+    agent = FakeRoles(fail={"critic"})
+    ctx = context(multi, agent, FakeArraySlurm(state_of(multi), lambda n, kind, seed: None))
+    multi_loop.copy_round_one(ctx)
+    assert multi_loop.plan_wave(ctx, 1, 3) is None
+    multi_loop.write_outcome(ctx, 1, 0, "a role step failed")
+    counts = multi_loop.summary_extra(ctx)["configurations"]
+    assert counts["planned"] == 3 and counts["not_reviewed"] == 3
+    assert counts["rejected_by_critic"] == 0 and counts["accepted"] == 0
+
+
+def test_check_report_uses_the_factor_100_only_for_percentages_and_keeps_signs(tmp_path):
+    records.write_json(tmp_path / "summary.json", {"weights_left": 0.0075, "val_accuracy": 0.9076, "error": -0.0123,
+                                                   "rounds": 45})
+    report = "0.75% right, 0.75 wrong, 0.9076% wrong, -0.0123 right, 0.0123 wrong, 2,048 checked, 4500 checked\n"
+    found = [item["number"] for item in check_report.unmatched_numbers(report, tmp_path)]
+    assert found == ["0.75", "0.9076%", "0.0123", "2,048", "4500"]

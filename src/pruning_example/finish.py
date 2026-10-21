@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import config, final_eval, metrics, records
 from .agent import AgentError, ModelCheckError, check_model, tokens_used
-from .slurm import SlurmError
+from .slurm import Accounting, SlurmError
 
 RESULT_KEYS = ("val_accuracy", "val_interval", "nonzero", "weights_left", "sparse_size_mb", "passes")
 SELECTION_FILE = "selection.json"
@@ -70,6 +70,16 @@ def saved_selection(ctx, history: list[dict]) -> int | None:
     return round_no
 
 
+def job_accounting(ctx, job: str) -> Accounting:
+    """Return the accounting of a job. If sacct has no record of it, count its time limit,
+    so that the GPU budget stays safe, and continue."""
+    try:
+        return ctx.slurm.accounting(job)
+    except (SlurmError, subprocess.TimeoutExpired) as error:
+        ctx.log(f"job {job}: no accounting ({error}); counting its time limit")
+        return Accounting("UNKNOWN", float(ctx.experiment["round"]["time_minutes"]), 0)
+
+
 def confirmation_round(ctx, round_no: int) -> dict | None:
     """Run the selected configuration again with seed 1. Return its metrics, or None."""
     state = ctx.paths.state
@@ -88,7 +98,7 @@ def confirmation_round(ctx, round_no: int) -> dict | None:
     outcome = ctx.slurm.wait(job, 60 * ctx.budget["queue_limit_minutes"])
     if outcome == "queue_limit":
         ctx.slurm.cancel(job)
-    usage = ctx.slurm.accounting(job)
+    usage = job_accounting(ctx, job)
     (state / "current_job").unlink(missing_ok=True)
     ctx.ledger.add(round=round_no, kind="confirm", status=outcome, job_id=job,
                    gpu_minutes=usage.gpu_minutes, slurm_state=usage.state)

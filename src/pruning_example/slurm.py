@@ -104,7 +104,8 @@ def parse_array_sacct(text: str) -> dict[int, TaskAccounting]:
             runs.setdefault(index, []).append(row)
     tasks = {}
     for index, rows in runs.items():
-        rows.sort(key=lambda row: row[3] if row[3][:1].isdigit() else "")  # Start; "Unknown" first
+        # Order the runs by Start. A run that never started (a waiting run that was canceled) comes last.
+        rows.sort(key=lambda row: (0, row[3]) if row[3][:1].isdigit() else (1, ""))
         minutes = sum(int(row[4] or 0) * gpu_count(row[5]) for row in rows) / 60
         last = rows[-1]
         tasks[index] = TaskAccounting(task=index, job_id=last[1], state=last[2].split()[0],

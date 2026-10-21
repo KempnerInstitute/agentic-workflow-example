@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 
 TOKEN_FIELDS = ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens")
@@ -48,7 +49,10 @@ def check_model(result: dict, model: str | None) -> None:
     if not model or not model.startswith("claude-"):
         return
     used = sorted((result.get("modelUsage") or {}).keys())
-    if not any(name == model or name.startswith((f"{model}-", f"{model}[")) for name in used):
+    # The name itself, with a date such as -20261001, or with a suffix such as [1m]. claude-opus-5 does not
+    # match claude-opus-5-5, which is another model.
+    same = re.compile(re.escape(model) + r"(-\d{8})?(\[[^\]]*\])?")
+    if not any(same.fullmatch(name) for name in used):
         raise ModelCheckError(f"the step used {', '.join(used) or 'no model'}, not the configured model {model}")
 
 

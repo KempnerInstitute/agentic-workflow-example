@@ -330,6 +330,20 @@ def test_check_model_skips_aliases_and_accepts_suffixes():
     check_model(result, None)
     with pytest.raises(ModelCheckError, match="not the configured model claude-sonnet-5-5"):
         check_model(result, "claude-sonnet-5-5")
+    check_model({"modelUsage": {"claude-opus-4-5-20251101": {}}}, "claude-opus-4-5")  # a dated name
+    with pytest.raises(ModelCheckError):
+        check_model({"modelUsage": {"claude-opus-5-5": {}}}, "claude-opus-5")  # another model, not a dated name
+
+
+def test_a_job_without_accounting_counts_its_time_limit(started):
+    class NoAccounting(FakeSlurm):
+        def accounting(self, job_id):
+            raise SlurmError(f"sacct has no record of job {job_id}")
+
+    ctx = context(started, FakeAgent(lambda call: GOOD), NoAccounting(started / "state", lambda n: (0.89, SMALL)),
+                  max_round_attempts=2)
+    assert loop.run_rounds(ctx) == "round_limit"
+    assert ctx.ledger.gpu_minutes == 10.0  # the time limit of the round job, so the GPU budget stays safe
 
 
 def test_gpu_reservation_starts_a_round_only_if_its_time_limit_fits(started):

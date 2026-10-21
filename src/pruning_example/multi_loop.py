@@ -331,7 +331,7 @@ def review(ctx, wave: int, kind: str, entries: list[dict], items_file: Path) -> 
     for entry in entries:
         verdict = verdicts.get(entry["item"])
         if verdict is None:
-            entry.update(status="rejected", reasons=["critic: no verdict"])
+            entry.update(status="rejected", reasons=["failed: the critic gave no verdict"])
         elif verdict["accept"]:
             entry.update(status="accepted", verdict=verdict["reason"])
         else:
@@ -399,7 +399,7 @@ def plan_wave(ctx, wave: int, count: int) -> list[dict] | None:
             if not accept_or_review(ctx, wave, "critic_2", replacements, folder / "review_items_2.json", reviews):
                 for entry in replacements:
                     if entry["status"] == "proposed":
-                        entry.update(status="dropped", reasons=["critic: the second critic step failed"])
+                        entry.update(status="dropped", reasons=["failed: the second critic step failed"])
             for entry in replacements:
                 if entry["status"] == "rejected":
                     entry["status"] = "dropped"
@@ -435,7 +435,8 @@ def write_plan(ctx, wave: int, summary: str, entries: list[dict], reviews: list[
         if entry.get("verdict"):
             lines += ["", f"Critic: {entry['verdict']}"]
         for reason in entry["reasons"]:
-            lines += ["", f"Rejected by the {reason}"]
+            source, _, text = reason.partition(":")
+            lines += ["", f"Rejected ({source}): {text.strip()}"]
     if failed:
         lines += ["", f"The {failed} step failed, so the wave has no accepted configuration."]
     lines += ["", "To run this plan, start the loop job: sbatch slurm/multi_loop.sbatch",
@@ -686,35 +687,60 @@ def same_wave(rows: list[dict], round_no: str, wave) -> bool:
 
 # Final steps
 
+def final_role_step(ctx, kind: str, prompt: str, schema_text: str | None, failures: dict) -> dict | None:
+    """Run the writer step or the auditor step. A failure, or a step that used another model, is recorded
+    in failures and does not stop the code checks that follow."""
+    try:
+        result = run_role(ctx, kind, prompt, schema_text)
+    except (AgentFormatError, ModelCheckError) as error:
+        failures[kind] = str(error)
+        ctx.log(f"{kind} step: {error}")
+        return None
+    if result is None:
+        failures[kind] = "the step failed"
+    return result
+
+
 def report_steps(ctx) -> None:
-    """The writer step and the auditor step. Both run if the total is below the token budget; the search
-    limit keeps the final reserve free for them."""
+    """The writer step and the auditor step, then the code checks. The role steps run if the total is below
+    the token budget; the search limit keeps the final reserve free for them."""
     write_hypotheses(ctx)
+    state = ctx.paths.state
+    report = state / "final_report.md"
+    failures = {}
     if ctx.ledger.tokens >= ctx.budget["tokens"]:
         ctx.log("writer and auditor skipped: the token budget is used up")
-        return
-    state = ctx.paths.state
-    result = run_role(ctx, "writer", render(ctx.paths.project / "prompts" / "multi" / "writer.md",
-                                            {"STATE": rel(ctx, state)}))
-    if result is not None:
-        (state / "final_report.md").write_text(str(result.get("result", "")).strip() + "\n")
-    run_audit(ctx, state / "final_report.md")
+        failures = {kind: "skipped: the token budget is used up" for kind in ("writer", "auditor")}
+    else:
+        prompt = render(ctx.paths.project / "prompts" / "multi" / "writer.md", {"STATE": rel(ctx, state)})
+        result = final_role_step(ctx, "writer", prompt, None, failures)
+        if result is not None:
+            report.write_text(str(result.get("result", "")).strip() + "\n")
+    run_audit(ctx, report, failures)
 
 
-def run_audit(ctx, report: Path) -> dict | None:
-    """Run the auditor step, check_report, and the check_round checks of the selected round. Write audit.json."""
+def run_audit(ctx, report: Path, failures: dict | None = None) -> dict:
+    """Run the auditor step, check_report, and the check_round checks of the selected round. Write audit.json.
+    The code checks run also when a role step failed or was skipped."""
     state = ctx.paths.state
+    failures = dict(failures or {})
+    schema = json.loads(ctx.schemas["audit"])
+    auditor = None
     if not report.exists():
-        ctx.log(f"audit skipped: {rel(ctx, report)} does not exist")
-        return None
-    prompt = render(ctx.paths.project / "prompts" / "multi" / "auditor.md",
-                    {"STATE": rel(ctx, state), "REPORT": rel(ctx, report)})
-    result = run_role(ctx, "auditor", prompt, ctx.schemas["audit"])
+        failures.setdefault("auditor", "skipped: there is no report")
+    elif "auditor" not in failures:
+        prompt = render(ctx.paths.project / "prompts" / "multi" / "auditor.md",
+                        {"STATE": rel(ctx, state), "REPORT": rel(ctx, report)})
+        result = final_role_step(ctx, "auditor", prompt, ctx.schemas["audit"], failures)
+        auditor = structured(result, schema)
+        if auditor is None and "auditor" not in failures:  # for example error_max_turns: no structured output
+            failures["auditor"] = f"no valid audit (subtype {result.get('subtype')})"
     audit = {
         "report": str(rel(ctx, report)),
-        "auditor": structured(result, json.loads(ctx.schemas["audit"])) if result else None,
-        "auditor_step_failed": result is None,
-        "unmatched_numbers": check_report.unmatched_numbers(report.read_text(), state),
+        "auditor": auditor,
+        "auditor_step_failed": auditor is None,
+        "failures": failures,
+        "unmatched_numbers": check_report.unmatched_numbers(report.read_text(), state) if report.exists() else None,
         "check_round": selected_round_checks(ctx),
     }
     records.write_json(state / "audit.json", audit)
@@ -749,7 +775,8 @@ def audit_summary(ctx) -> dict | None:
         "unsupported": sum(claim["verdict"] == "unsupported" for claim in claims),
         "limits_stated": (audit.get("auditor") or {}).get("limits_stated"),
         "auditor_step_failed": audit.get("auditor_step_failed"),
-        "unmatched_numbers": len(audit.get("unmatched_numbers", [])),
+        "failures": audit.get("failures", {}),
+        "unmatched_numbers": None if audit.get("unmatched_numbers") is None else len(audit["unmatched_numbers"]),
         "check_round_ok": (audit.get("check_round") or {}).get("ok"),
     }
 
@@ -768,17 +795,21 @@ def summary_extra(ctx) -> dict:
             "tokens": int(ctx.ledger.total("tokens", kinds)),
             "estimated_cost_usd": round(ctx.ledger.total("cost_usd", kinds), 2),
         }
-    counts = {"proposed": 0, "rejected_by_code": 0, "rejected_by_critic": 0, "replaced": 0, "dropped": 0, "accepted": 0}
+    # Each planned configuration counts one time. "not_reviewed": a critic step failed before its verdict.
+    # "not_revised": rejected, but the revision did not run.
+    counts = {"planned": 0, "accepted": 0, "replaced": 0, "dropped": 0, "not_reviewed": 0, "not_revised": 0,
+              "rejected_by_code": 0, "rejected_by_critic": 0}
+    final_status = {"accepted": "accepted", "replaced": "replaced", "dropped": "dropped",
+                    "proposed": "not_reviewed", "rejected": "not_revised"}
     waves = []
     for wave in wave_numbers(ctx):
         folder = wave_dir(ctx, wave)
         if (folder / "plan.json").exists():
             for entry in records.read_json(folder / "plan.json")["entries"]:
-                counts["proposed"] += 1
+                counts["planned"] += 1
+                counts[final_status[entry["status"]]] += 1
                 counts["rejected_by_code"] += any(reason.startswith("code:") for reason in entry["reasons"])
                 counts["rejected_by_critic"] += any(reason.startswith("critic:") for reason in entry["reasons"])
-                if entry["status"] in counts:
-                    counts[entry["status"]] += 1
         if (folder / "outcome.json").exists():
             waves.append({"wave": wave, "tokens": wave_tokens(ctx, wave), **records.read_json(folder / "outcome.json")})
     rows = write_hypotheses(ctx) if (ctx.paths.state / "waves").exists() else []
@@ -827,15 +858,26 @@ def check_start(ctx, plan_only: bool = False) -> None:
     check_time_lines(ctx, ROUND_SCRIPTS)
     check_roles(ctx.experiment)
     records.check_integrity(project)
-    if not plan_only and not (wave_dir(ctx, 1) / "accepted.json").exists():
-        raise SystemExit("Wave 1 has no plan. Run 'sbatch --time=01:30:00 slurm/multi_loop.sbatch --plan-only', "
-                         "and read the plan first.")
+    accepted = wave_dir(ctx, 1) / "accepted.json"
+    if not plan_only and not (accepted.exists() and records.read_json(accepted)):
+        raise SystemExit("Wave 1 has no accepted configuration. Run 'sbatch --time=01:30:00 slurm/multi_loop.sbatch "
+                         "--plan-only', and read the plan first.")
+    clean_up_after_a_stop(ctx)
+
+
+def clean_up_after_a_stop(ctx) -> None:
+    """Cancel the job of an earlier loop job that stopped without a cancel, close its open wave,
+    and write the missing history rows."""
     leftover = ctx.paths.state / "current_job"
-    if leftover.exists():  # an earlier loop job stopped without a cancel
+    if leftover.exists():
         job = leftover.read_text().strip()
         ctx.slurm.cancel(job, wait_seconds=15)
         leftover.unlink(missing_ok=True)
-        ctx.log(f"canceled the array job {job} of an earlier loop job")
+        ctx.log(f"canceled the job {job} of an earlier loop job")
+    for wave in wave_numbers(ctx):
+        folder = wave_dir(ctx, wave)
+        if (folder / "tasks.tsv").exists() and not (folder / "outcome.json").exists():
+            close_interrupted_wave(ctx, wave)
     write_missing_rows(ctx)
 
 
@@ -844,6 +886,9 @@ def plan_first_wave(ctx) -> int:
     check_start(ctx, plan_only=True)
     folder = wave_dir(ctx, 1)
     if (folder / "accepted.json").exists():
+        if not records.read_json(folder / "accepted.json"):
+            ctx.log(f"Wave 1 has no accepted configuration. Remove {rel(ctx, folder)}, and plan again.")
+            return 1
         ctx.log(f"Wave 1 already has a plan: read {rel(ctx, folder / 'plan.md')}. "
                 f"To plan again, remove {rel(ctx, folder)}.")
         return 0
@@ -944,7 +989,7 @@ def run(ctx, mode: str = "loop") -> int:
         if mode == "audit_only":
             return audit_only(ctx)
         if mode == "finish":
-            write_missing_rows(ctx)
+            clean_up_after_a_stop(ctx)
             reason = finish.previous_stop_reason(ctx) or "finish_only"
         else:
             check_start(ctx)
@@ -961,8 +1006,7 @@ def run(ctx, mode: str = "loop") -> int:
         if mode in ("plan_only", "audit_only"):
             ctx.log("SIGTERM: stopped.")
             return 1
-        write_missing_rows(ctx)
-        finish.write_summary(ctx, reason or "terminated", final=False, terminated=True, extra=summary_extra(ctx))
+        # Cancel first: the records below read many files, and SIGKILL can come before they are done.
         current = ctx.paths.state / "current_job"
         if current.exists():
             job = current.read_text().strip()
@@ -970,6 +1014,9 @@ def run(ctx, mode: str = "loop") -> int:
             current.unlink(missing_ok=True)
             ctx.log(f"SIGTERM: asked SLURM to cancel array job {job}"
                     f"{'' if answered else ' (scancel did not answer in 15 seconds)'}.")
+        write_missing_rows(ctx)
+        # Keep the stop reason of the waves if they ended, so that --finish can use it.
+        finish.write_summary(ctx, reason or "terminated", final=False, terminated=True, extra=summary_extra(ctx))
         ctx.log("SIGTERM: the loop script stopped. Run 'sbatch slurm/multi_loop.sbatch --finish' for the final steps.")
         return 1
 
