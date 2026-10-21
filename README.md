@@ -12,6 +12,8 @@ A Claude Code agent prunes a ResNet-18 model for CIFAR-10 on the Kempner AI clus
 
 In the unattended phase, the agent has read-only tools. It cannot run commands, write files, or submit jobs. The loop script, which is committed code, does these tasks.
 
+A second version of the loop uses four agent roles and runs 3 rounds at a time; see [Multi-agent version](#multi-agent-version).
+
 ## Before you start
 
 - A Kempner AI cluster account, and a SLURM account that can use `kempner_requeue` and `shared`.
@@ -80,7 +82,7 @@ Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv
 |---|---|
 | Accuracy threshold | Validation accuracy of at least 0.905. The loop looks for the fewest weights that keep it, and stops after 3 rounds in a row without a smaller passing model. |
 | Tokens | 1,000,000 for the unattended phase, with 10% kept for the report step. All four token types count, cache reads too. |
-| Agent step | `--max-turns 8`, `--max-budget-usd 1.00`, read-only tools, `dontAsk` |
+| Agent step | `claude-opus-5-5` at the `medium` effort level, `--max-turns 8`, `--max-budget-usd 1.00`, read-only tools, `dontAsk`. The loop script stops if a step used another model. |
 | Rounds | 15 round attempts, round 1 included |
 | GPU | 60 GPU minutes for the unattended phase. One round job at a time, 1 GPU, 10 minutes at most. |
 | Queue | A job can wait at most 45 minutes in the queue |
@@ -91,6 +93,7 @@ Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv
 | File | Content |
 |---|---|
 | `state/summary.json` | Stop reason, totals, the selected round, both seeds, validation and test accuracy with 95% intervals |
+| `state/selection.json` | The selected round, saved before the confirmation round, so that `--finish` keeps it |
 | `state/final_report.md` | The draft report of the agent. Check each number against the other files. |
 | `state/history.tsv` | One row for each round attempt |
 | `state/ledger.tsv` | Tokens of each agent step, and GPU minutes of each job |
@@ -108,7 +111,7 @@ The round checkpoints are in `RUN_ROOT` on scratch storage. FASRC deletes scratc
 | Writes | The agent asks first. Deny rules block edits of tracked files and output folders. | None |
 | Shell | Sandbox on, SLURM commands outside it, `scancel` and `rm -r` blocked by a hook | No shell |
 | Job submission | `sbatch` asks | The loop script submits |
-| Reads | File tools: only the project folder. Sandboxed commands: not the home folder. | Only the project folder |
+| Reads | File tools: only the project folder. Sandboxed commands: not the home folder. | Only the project folder, and not this README, which holds the results of our runs |
 | Integrity | The round job and the loop script stop if a tracked file changed | The same |
 
 ## Skills
@@ -135,6 +138,40 @@ done
 git diff --stat .claude/skills
 ```
 
+## Multi-agent version
+
+The multi-agent loop runs the same task with four agent roles. Each role step is one read-only `claude -p` call with its own model and effort level. The loop script still checks each output, submits the jobs, and writes all records.
+
+| Role | Model | Effort | Task |
+|---|---|---|---|
+| Planner | `claude-opus-5-5` | `xhigh` | Plans each wave: 3 configurations, each with a hypothesis, a predicted validation accuracy, and a pass probability |
+| Critic | `claude-sonnet-5-5` | `high` | Accepts or rejects each configuration before any GPU job runs |
+| Writer | `claude-sonnet-5-5` | `medium` | Writes the draft report |
+| Auditor | `claude-opus-5-5` | `max` | Checks each claim of the draft report against the records |
+
+`experiment_multi.yaml` sets these values; change them there. A checker uses a different model from the role that it checks. With `roles.critic.enabled: false`, the loop is one agent that plans waves of 3. The role prompts are in `prompts/multi/roles/`.
+
+Run it after the setup, the baseline, and round 1 above:
+
+```bash
+source cluster.env
+sbatch --time=01:30:00 slurm/multi_loop.sbatch --plan-only   # plan wave 1, then stop
+cat state_multi/waves/wave_01/plan.md                        # read the plan and the critic's verdicts
+sbatch slurm/multi_loop.sbatch                               # run wave 1 and the next waves
+```
+
+To plan wave 1 again, remove `state_multi/waves/wave_01/`, and run the `--plan-only` job again. Watch the run with `tail -f logs/prune-multi-loop_<job_id>.out`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its array job. To run the final steps later, run `sbatch slurm/multi_loop.sbatch --finish`.
+
+What changes from the single-agent loop:
+
+- **Waves.** Each wave is one array job of up to 3 round jobs (`slurm/round_array.sbatch`). The loop script writes the history rows of a wave in round order.
+- **Checks.** The code checks each configuration first: the schema, and no repeat. Then the critic checks it. A rejected configuration gets one revision. If the revision is rejected too, it is dropped.
+- **Limits.** 1,000,000 tokens, with 20% kept for the writer and the auditor. 60 GPU minutes: the loop script starts a round only if the round's 10-minute time limit still fits. 45 round attempts. The loop stops after 6 rounds in a row without a smaller passing model.
+- **Final steps.** Two confirmation rounds, with seeds 1 and 2, as one array job. The summary gives the mean validation accuracy and the mean test accuracy of the 3 seeds. Then the writer step, the auditor step, `check_report` (the numbers of the report against the records), and the checks of `check_round` for the selected round.
+- **Records.** `state_multi/`, with `waves/wave_NN/` (the plan, the tasks, and the outcome), `hypotheses.tsv` (each prediction and its result), `audit.json`, and a ledger with the model and the effort level of each step.
+
+To check the report of the single-agent loop the same way, run `STATE_DIR=state sbatch slurm/multi_loop.sbatch --audit-only`. To compare the two designs, run each one in its own clone that holds only the baseline and round 1. Then the agents of one design cannot read the records of the other.
+
 ## Test the loop with small limits
 
 Put test copies in `local/`, which Git ignores. `EXPERIMENT_FILE` and `STATE_DIR` point the jobs to them:
@@ -160,13 +197,15 @@ The tests use generated images, so they need no GPU and no data. CI runs them wi
 ```text
 AGENTS.md, CLAUDE.md      agent instructions
 experiment.yaml           accuracy threshold, recipe, and limits
+experiment_multi.yaml     roles, models, effort levels, waves, and limits of the multi-agent loop
 cluster.env.example       your account and paths
 .claude/                  settings, hook, and skills
-configs/                  round configuration schema and an example
+configs/                  schemas of a round configuration, a wave plan, a review, and an audit
 prompts/                  prompts of the agent step and the report step
+prompts/multi/            role prompts and task prompts of the multi-agent loop
 data/split.json           fixed validation split
-slurm/                    baseline, round, and loop jobs
-src/pruning_example/      code: data, model, evaluator, pruning, records, loop, final steps
+slurm/                    baseline, round, round array, loop, and multi-agent loop jobs
+src/pruning_example/      code: data, model, evaluator, pruning, records, loops, final steps, checks
 tests/                    pytest tests
 ```
 
@@ -201,6 +240,8 @@ The confirmation round passed exactly at the threshold, and both test values are
 ## Tested with
 
 Claude Code 2.1.302, uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04, on A100, H100, H200, and RTX PRO 6000 GPUs, in October 2026.
+
+The multi-agent version has passed its unit tests. Its tests on the cluster and its runs are still to come.
 
 ## Adapt the example
 
