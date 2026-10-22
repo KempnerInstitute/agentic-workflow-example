@@ -74,7 +74,7 @@ source cluster.env
 sbatch slurm/loop.sbatch
 ```
 
-Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its own round job and writes `state/summary.json`. To run the final steps later, run `sbatch slurm/loop.sbatch --finish`.
+Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its own round job and writes `state/summary.json`. The next loop job counts the GPU minutes of the canceled job. To run the final steps later, run `sbatch slurm/loop.sbatch --finish`.
 
 ## Limits
 
@@ -160,13 +160,14 @@ cat state_multi/waves/wave_01/plan.md                        # read the plan and
 sbatch slurm/multi_loop.sbatch                               # run wave 1 and the next waves
 ```
 
-To plan wave 1 again, remove `state_multi/waves/wave_01/`, and run the `--plan-only` job again. Watch the run with `tail -f logs/prune-multi-loop_<job_id>.out`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its array job. To run the final steps later, run `sbatch slurm/multi_loop.sbatch --finish`.
+To plan wave 1 again, remove `state_multi/waves/wave_01/`, and run the `--plan-only` job again. Watch the run with `tail -f logs/prune-multi-loop_<job_id>.out`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its array job, and the next loop job counts its GPU minutes. To run the final steps later, run `sbatch slurm/multi_loop.sbatch --finish`.
 
 What changes from the single-agent loop:
 
 - **Waves.** Each wave is one array job of up to 3 round jobs (`slurm/round_array.sbatch`). The loop script writes the history rows of a wave in round order.
+- **GPUs.** The round jobs run on A100 MIG slices (3g.20gb). A round is small, and the slices are often free when the full GPUs are busy. A round takes 1 to 3 minutes on a slice, 3 to 4 times longer than on a full GPU.
 - **Checks.** The code checks each configuration first: the schema, and no repeat. Then the critic checks it. A rejected configuration gets one revision. If the revision is rejected too, it is dropped.
-- **Limits.** 1,000,000 tokens, with 20% kept for the writer and the auditor. 60 GPU minutes: the loop script starts a round only if the round's 10-minute time limit still fits. 45 round attempts. The loop stops after 6 rounds in a row without a smaller passing model.
+- **Limits.** 1,250,000 tokens, with 36% (450,000) kept for the writer and the auditor, so the search can use 800,000. 150 GPU minutes on MIG slices: the loop script starts a round only if the round's 10-minute time limit still fits. 45 round attempts. The loop stops after 6 rounds in a row without a smaller passing model.
 - **Final steps.** Two confirmation rounds, with seeds 1 and 2, as one array job. The summary gives the mean validation accuracy and the mean test accuracy of the 3 seeds. Then the writer step, the auditor step, `check_report` (the numbers of the report against the records), and the checks of `check_round` for the selected round.
 - **Records.** `state_multi/`, with `waves/wave_NN/` (the plan, the tasks, and the outcome), `hypotheses.tsv` (each prediction and its result), `audit.json`, and a ledger with the model and the effort level of each step.
 
@@ -241,7 +242,7 @@ The confirmation round passed exactly at the threshold, and both test values are
 
 Claude Code 2.1.302, uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04, on A100, H100, H200, and RTX PRO 6000 GPUs, in October 2026.
 
-The multi-agent version has passed its unit tests. Its tests on the cluster and its runs are still to come.
+The multi-agent version passed its unit tests and its cluster tests of the loop mechanics, with Claude Code 2.1.307 and 2.1.308 on A100 MIG slices, in October 2026. Its runs are still to come.
 
 ## Adapt the example
 

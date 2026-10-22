@@ -2,7 +2,8 @@
 
 Usage: python -m pruning_example.check_report [REPORT]
 
-The command lists each number of the report that it cannot find in the records. It checks each number
+The command lists each number of the report that it cannot find in the records: the files of the state
+folder and the baseline metrics, which a report often cites. It checks each number
 with a decimal point, each percentage, and each whole number of 4 or more digits. It skips small whole
 numbers, such as round numbers and seeds, and years. A record value matches if the report number is
 a rounding of it, and a percentage matches if it is a rounding of 100 times a record value. The sign
@@ -45,15 +46,15 @@ def numbers_in(value, found: list[float]) -> None:
             numbers_in(item, found)
 
 
-def record_values(state: Path) -> list[float]:
-    """Return the numbers in the records of a state folder."""
+def record_values(state: Path, baseline: Path | None = None) -> list[float]:
+    """Return the numbers in the records of a state folder, and in the baseline metrics if given."""
     found: list[float] = []
-    for pattern in JSON_GLOBS:
-        for path in sorted(state.glob(pattern)):
-            try:
-                numbers_in(json.loads(path.read_text()), found)
-            except (OSError, json.JSONDecodeError):
-                continue
+    paths = [path for pattern in JSON_GLOBS for path in sorted(state.glob(pattern))]
+    for path in paths + ([baseline] if baseline is not None else []):
+        try:
+            numbers_in(json.loads(path.read_text()), found)
+        except (OSError, json.JSONDecodeError):
+            continue
     for name in TABLES:
         path = state / name
         if path.exists():
@@ -83,9 +84,9 @@ def checked(whole: str, fraction: str | None, percent: str) -> bool:
     return len(digits) >= 4 and not is_year
 
 
-def unmatched_numbers(text: str, state: Path) -> list[dict]:
+def unmatched_numbers(text: str, state: Path, baseline: Path | None = None) -> list[dict]:
     """Return the numbers of the report that the records do not show, with their line numbers."""
-    values = record_values(state)
+    values = record_values(state, baseline)
     missing = []
     for line_no, line in enumerate(text.splitlines(), 1):
         for match in NUMBER.finditer(line):
@@ -102,7 +103,7 @@ def main(argv=None) -> int:
     if not report.exists():
         print(f"There is no report: {report}")
         return 2
-    missing = unmatched_numbers(report.read_text(), paths.state)
+    missing = unmatched_numbers(report.read_text(), paths.state, paths.project / config.BASELINE_METRICS)
     for item in missing:
         print(f"line {item['line']}: {item['number']} is not in the records")
     print(f"{len(missing)} number(s) not found in {paths.state.name}/" if missing else "Each checked number is in the records.")

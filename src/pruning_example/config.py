@@ -14,6 +14,7 @@ EXPERIMENT_PATH = Path("experiment.yaml")
 SCHEMA_PATH = Path("configs/round.schema.json")
 SPLIT_PATH = Path("data/split.json")
 BASELINE_MODEL = Path("results/baseline/model.pt")
+BASELINE_METRICS = Path("state/baseline/metrics.json")
 
 
 class ConfigError(ValueError):

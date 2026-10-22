@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=prune-round
 #SBATCH --partition=kempner_requeue
-#SBATCH --constraint=a100|h100|h200|rtx6000pro
+#SBATCH --constraint=a100-mig
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
@@ -19,6 +19,10 @@
 # Task i runs line i+1. %j gives each task its own job ID, so each task has its own log.
 # kempner_requeue can preempt a task. The task saves a checkpoint after each epoch and continues after a requeue.
 # Keep --time equal to round.time_minutes in the experiment file.
+# The tasks use A100 MIG slices (3g.20gb). A round is small, and the slices are often free when the full GPUs
+# are busy. A round takes 1 to 3 minutes on a slice, 3 to 4 times longer than on a full GPU, so
+# experiment_multi.yaml has a larger GPU budget. The single-agent loop uses this script only for several
+# confirmation seeds; its rounds keep the full GPUs of slurm/round.sbatch.
 
 set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"

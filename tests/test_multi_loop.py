@@ -321,13 +321,13 @@ def test_each_role_step_gets_its_model_effort_and_role_prompt(multi):
     assert "enabled" not in critic_caps
     row = ctx.ledger.rows[0]
     assert (row["kind"], row["wave"], row["model"], row["effort"]) == ("planner", "1", "claude-opus-5-5", "xhigh")
-    assert "GPU minutes left: 60" in agent.calls[0][1] and "Round attempts left: 44" in agent.calls[0][1]
+    assert "GPU minutes left: 150" in agent.calls[0][1] and "Round attempts left: 44" in agent.calls[0][1]
 
 
 # Limits
 
 def test_wave_size_follows_all_four_limits(multi):
-    ctx = context(multi, FakeRoles(), FakeArraySlurm(state_of(multi), lambda n, kind, seed: None))
+    ctx = context(multi, FakeRoles(), FakeArraySlurm(state_of(multi), lambda n, kind, seed: None), gpu_minutes=60)
     multi_loop.copy_round_one(ctx)
     history = records.read_history(ctx.paths.state)
     assert multi_loop.wave_size(ctx, history) == 3
@@ -343,7 +343,7 @@ def test_wave_size_follows_all_four_limits(multi):
 
 
 def test_stop_rules_before_a_wave(multi):
-    ctx = context(multi, FakeRoles(), FakeArraySlurm(state_of(multi), lambda n, kind, seed: None))
+    ctx = context(multi, FakeRoles(), FakeArraySlurm(state_of(multi), lambda n, kind, seed: None), gpu_minutes=60)
     multi_loop.copy_round_one(ctx)
     assert multi_loop.stop_reason(ctx) is None
     ctx.ledger.add(round="", kind="planner", tokens=700_000, wave=1)
@@ -628,3 +628,36 @@ def test_check_report_uses_the_factor_100_only_for_percentages_and_keeps_signs(t
     report = "0.75% right, 0.75 wrong, 0.9076% wrong, -0.0123 right, 0.0123 wrong, 2,048 checked, 4500 checked\n"
     found = [item["number"] for item in check_report.unmatched_numbers(report, tmp_path)]
     assert found == ["0.75", "0.9076%", "0.0123", "2,048", "4500"]
+
+
+# Fixes after the cluster tests
+
+def test_finish_counts_the_confirmation_array_job_that_a_stopped_loop_job_canceled(multi, monkeypatch):
+    monkeypatch.setattr(multi_loop.signal, "signal", lambda *args: None)  # keep the signal handlers of pytest
+    slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL - n) if kind == "round" else None,
+                           stop_on_wave=2)  # array job 2 is the confirmation of the selected round
+    ctx, code = plan_then_run(multi, FakeRoles(), slurm, max_round_attempts=4)
+    assert code == 1
+    state = state_of(multi)
+    job = slurm.arrays[1][0]
+    assert slurm.canceled == [job]
+    selected = records.read_json(state / finish.SELECTION_FILE)["round"]
+    assert (state / finish.PENDING_FILE).read_text() == f"{job}\tconfirm\t{selected}\t2\n"
+
+    slurm.stop_on_wave = None
+    slurm.results = lambda n, kind, seed: (0.91, SMALL - n) if kind == "round" else (0.906, SMALL)
+    ctx = context(multi, FakeRoles(), slurm)
+    assert multi_loop.run(ctx, "finish") == 0
+    rows = [(row["status"], row["job_id"]) for row in ctx.ledger.rows if row["kind"] == "confirm"]
+    assert rows[:2] == [("interrupted", f"{job}0"), ("interrupted", f"{job}1")]
+    assert len(rows) == 4  # then the two new confirmation rounds
+    assert not (state / finish.PENDING_FILE).exists()
+
+
+def test_check_report_reads_the_baseline_metrics(tmp_path):
+    state = tmp_path / "state_multi"
+    records.write_json(state / "summary.json", {"selected": {"val_accuracy": 0.9182}})
+    records.write_json(tmp_path / config.BASELINE_METRICS, {"val_accuracy": 0.937})
+    report = "Round 4 keeps 0.9182 validation accuracy. The baseline has 0.937.\n"
+    assert check_report.unmatched_numbers(report, state) == [{"number": "0.937", "line": 1}]
+    assert check_report.unmatched_numbers(report, state, tmp_path / config.BASELINE_METRICS) == []

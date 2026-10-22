@@ -391,3 +391,55 @@ def test_record_paths_of_confirmation_seeds(tmp_path):
     assert records.record_dir(tmp_path, "confirm", 7, 2) == tmp_path / "confirm" / "round_07_seed2"
     assert records.test_eval_path(tmp_path, "confirm", 7, 2) == tmp_path / "test_eval" / "confirm_07_seed2.json"
     assert records.test_eval_path(tmp_path, "round", 7) == tmp_path / "test_eval" / "round_07.json"
+
+
+# GPU minutes of jobs that a stopped loop job did not count
+
+def test_the_next_loop_job_counts_the_round_job_that_a_stopped_one_canceled(started, monkeypatch):
+    class StoppedSlurm(FakeSlurm):
+        def wait(self, job_id, queue_limit_seconds):
+            raise loop.Terminated()
+
+    monkeypatch.setattr(loop.signal, "signal", lambda *args: None)  # keep the signal handlers of pytest
+    state = started / "state"
+    assert loop.run(context(started, FakeAgent(lambda call: GOOD), StoppedSlurm(state, lambda n: None))) == 1
+    assert (state / finish.PENDING_FILE).read_text() == "1001\tround\t2\t0\n"  # not in the ledger yet
+
+    monkeypatch.setattr(finish, "evaluate_on_test_set", lambda ctx, kind, n: {"test_accuracy": 0.902, "kind": kind})
+    slurm = FakeSlurm(state, lambda n: (0.93, 1_000_000), gpu_minutes=1.5)
+    ctx = context(started, FakeAgent(lambda call: GOOD), slurm, max_round_attempts=1)
+    assert loop.run(ctx) == 0
+    assert slurm.canceled == ["1001"]  # in case it still runs
+    rows = [(row["round"], row["kind"], row["status"]) for row in ctx.ledger.rows if row["kind"] in ("round", "confirm")]
+    assert rows == [("2", "round", "interrupted"), ("1", "confirm", "ended")]
+    assert ctx.ledger.gpu_minutes == 1.5  # the canceled round counts against the GPU budget
+    assert not (state / finish.PENDING_FILE).exists()
+
+
+def test_finish_counts_the_confirmation_job_that_a_stopped_loop_job_canceled(started, monkeypatch):
+    class StopInConfirmation(FakeSlurm):
+        def submit(self, script, args, cwd):
+            if "confirm" in args:  # the job starts, but writes no records before the stop
+                self.submitted.append(("confirm", int(args[args.index("--round") + 1])))
+                return str(1000 + len(self.submitted))
+            return super().submit(script, args, cwd)
+
+        def wait(self, job_id, queue_limit_seconds):
+            if self.submitted[-1][0] == "confirm":
+                raise loop.Terminated()
+            return "ended"
+
+    monkeypatch.setattr(loop.signal, "signal", lambda *args: None)
+    state = started / "state"
+    stopped = StopInConfirmation(state, lambda n: (0.91, SMALL))
+    assert loop.run(context(started, FakeAgent(lambda call: GOOD), stopped, plateau_rounds=1)) == 1
+    job = stopped.canceled[0]
+    assert (state / finish.PENDING_FILE).read_text().startswith(f"{job}\tconfirm\t")
+
+    monkeypatch.setattr(finish, "evaluate_on_test_set", lambda ctx, kind, n: {"test_accuracy": 0.902, "kind": kind})
+    ctx = context(started, FakeAgent(lambda call: GOOD), FakeSlurm(state, lambda n: (0.91, SMALL)))
+    assert loop.run(ctx, finish_only=True) == 0
+    rows = [(row["status"], row["job_id"]) for row in ctx.ledger.rows if row["kind"] == "confirm"]
+    assert rows[0] == ("interrupted", job)
+    assert len(rows) == 2  # then the new confirmation round
+    assert not (state / finish.PENDING_FILE).exists()

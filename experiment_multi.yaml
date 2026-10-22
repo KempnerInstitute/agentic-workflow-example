@@ -55,10 +55,10 @@ roles:
     timeout_minutes: 30
 
 budget:
-  tokens: 1000000            # all four token types of all models, cache reads included, supervised wave included
-  final_reserve_fraction: 0.20   # kept for the writer and the auditor; the search can use the rest
+  tokens: 1250000            # all four token types of all models, cache reads included, supervised wave included
+  final_reserve_fraction: 0.36   # 450,000 tokens kept for the writer and the auditor; the search can use 800,000
   wave_token_estimate: 150000    # used before the first measured wave; then the largest wave so far
-  gpu_minutes: 60            # rounds after round 1; failed and requeued runs count
+  gpu_minutes: 150           # rounds after round 1, on A100 MIG slices; failed and requeued runs count
   max_round_attempts: 45     # round 1 included; all agents of a run share them
   max_failed_waves: 2        # waves in a row with no complete round
   queue_limit_minutes: 45    # total queue time of one array job, requeues included

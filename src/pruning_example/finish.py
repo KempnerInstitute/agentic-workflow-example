@@ -16,6 +16,7 @@ from .slurm import Accounting, SlurmError
 
 RESULT_KEYS = ("val_accuracy", "val_interval", "nonzero", "weights_left", "sparse_size_mb", "passes")
 SELECTION_FILE = "selection.json"
+PENDING_FILE = "pending_jobs.tsv"  # jobs whose GPU minutes are not in the ledger yet
 DEFAULT_TEST_TARGET = 0.900  # the goal of the example: a test accuracy of at least 90%
 
 
@@ -80,6 +81,54 @@ def job_accounting(ctx, job: str) -> Accounting:
         return Accounting("UNKNOWN", float(ctx.experiment["round"]["time_minutes"]), 0)
 
 
+def note_pending_job(ctx, job: str, kind: str, round_no: int, tasks: int = 0) -> None:
+    """Note a submitted job until its GPU minutes are in the ledger. tasks is the number of array tasks,
+    or 0 for one job. If the loop job stops first, for example after scancel, the next loop job counts it."""
+    with open(ctx.paths.state / PENDING_FILE, "a") as pending:
+        pending.write(f"{job}\t{kind}\t{round_no}\t{tasks}\n")
+
+
+def mark_counted(ctx, job: str) -> None:
+    """Remove a job from the pending jobs after its ledger rows are written."""
+    path = ctx.paths.state / PENDING_FILE
+    if not path.exists():
+        return
+    lines = [line for line in path.read_text().splitlines() if line.split("\t")[0] != job]
+    if lines:
+        path.write_text("\n".join(lines) + "\n")
+    else:
+        path.unlink()
+
+
+def count_pending_jobs(ctx) -> int:
+    """Write the ledger rows of the jobs that an earlier loop job submitted but did not count, with the
+    status interrupted. Cancel each job first, in case it still runs. Return the number of jobs."""
+    path = ctx.paths.state / PENDING_FILE
+    if not path.exists():
+        return 0
+    jobs = [line.split("\t") for line in path.read_text().splitlines() if line.count("\t") == 3]
+    for job, kind, round_no, tasks in jobs:
+        ctx.slurm.cancel(job, wait_seconds=15)
+        if int(tasks):
+            usage = ctx.slurm.array_accounting(job, int(tasks))
+            for index in range(int(tasks)):
+                task = usage.get(index)
+                ctx.ledger.add(round=int(round_no), kind=kind, status="interrupted",
+                               job_id=task.job_id if task else f"{job}_{index}",
+                               # without accounting, count the time limit, so that the GPU total stays safe
+                               gpu_minutes=task.gpu_minutes if task else ctx.experiment["round"]["time_minutes"],
+                               slurm_state=task.state if task else "UNKNOWN")
+        else:
+            usage = job_accounting(ctx, job)
+            ctx.ledger.add(round=int(round_no), kind=kind, status="interrupted", job_id=job,
+                           gpu_minutes=usage.gpu_minutes, slurm_state=usage.state)
+        mark_counted(ctx, job)  # one job at a time, so that an error cannot count a job two times
+    path.unlink(missing_ok=True)  # lines that are not jobs
+    if jobs:
+        ctx.log(f"counted the GPU minutes of {len(jobs)} job(s) that an earlier loop job did not count")
+    return len(jobs)
+
+
 def confirmation_round(ctx, round_no: int) -> dict | None:
     """Run the selected configuration again with seed 1. Return its metrics, or None."""
     state = ctx.paths.state
@@ -94,6 +143,7 @@ def confirmation_round(ctx, round_no: int) -> dict | None:
         ctx.log(f"confirmation round: sbatch failed: {error}")
         return None
     (state / "current_job").write_text(job + "\n")
+    note_pending_job(ctx, job, "confirm", round_no)
     ctx.log(f"confirmation round: submitted job {job}")
     outcome = ctx.slurm.wait(job, 60 * ctx.budget["queue_limit_minutes"])
     if outcome == "queue_limit":
@@ -102,6 +152,7 @@ def confirmation_round(ctx, round_no: int) -> dict | None:
     (state / "current_job").unlink(missing_ok=True)
     ctx.ledger.add(round=round_no, kind="confirm", status=outcome, job_id=job,
                    gpu_minutes=usage.gpu_minutes, slurm_state=usage.state)
+    mark_counted(ctx, job)
     return records.read_json(record) if record.exists() else None
 
 
@@ -129,6 +180,7 @@ def confirmation_rounds(ctx, round_no: int, seeds: list[int]) -> dict[int, dict 
             ctx.log(f"confirmation rounds: sbatch failed: {error}")
         else:
             (state / "current_job").write_text(job + "\n")
+            note_pending_job(ctx, job, "confirm", round_no, len(missing))
             ctx.log(f"confirmation rounds: submitted array job {job} for seeds {', '.join(map(str, missing))}")
             outcome = ctx.slurm.wait_array(job, 60 * ctx.budget["queue_limit_minutes"])
             usage = ctx.slurm.array_accounting(job, len(missing))
@@ -140,6 +192,7 @@ def confirmation_rounds(ctx, round_no: int, seeds: list[int]) -> dict[int, dict 
                                # without accounting, count the time limit, so that the GPU total stays safe
                                gpu_minutes=task.gpu_minutes if task else ctx.experiment["round"]["time_minutes"],
                                slurm_state=task.state if task else "UNKNOWN")
+            mark_counted(ctx, job)
     results = {}
     for seed in seeds:
         record = records.record_dir(state, "confirm", round_no, seed) / "metrics.json"

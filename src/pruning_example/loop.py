@@ -224,6 +224,7 @@ def run_attempt(ctx: Context, round_no: int) -> None:
         fail(ctx, round_no, "sbatch_failed", str(error), round_config)
         return
     (state / "current_job").write_text(job + "\n")
+    finish.note_pending_job(ctx, job, "round", round_no)
     ctx.log(f"round {round_no}: submitted job {job}")
     outcome = ctx.slurm.wait(job, 60 * ctx.budget["queue_limit_minutes"])
     if outcome == "queue_limit":
@@ -232,6 +233,7 @@ def run_attempt(ctx: Context, round_no: int) -> None:
     (state / "current_job").unlink(missing_ok=True)
     ctx.ledger.add(round=round_no, kind="round", status=outcome, job_id=job,
                    gpu_minutes=usage.gpu_minutes, slurm_state=usage.state)
+    finish.mark_counted(ctx, job)
 
     rows = [row for row in records.read_history(state) if int(row["round"]) == round_no]
     if outcome == "queue_limit":
@@ -318,9 +320,11 @@ def run(ctx: Context, finish_only: bool = False) -> int:
             f"state folder: {ctx.paths.state.relative_to(ctx.paths.project)}")
     try:
         if finish_only:
+            finish.count_pending_jobs(ctx)
             reason = finish.previous_stop_reason(ctx) or "finish_only"
         else:
             check_start(ctx)
+            finish.count_pending_jobs(ctx)
             reason = run_rounds(ctx)
             ctx.log(f"stop: {reason}")
         finish.run_final_steps(ctx, reason)

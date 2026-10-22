@@ -740,7 +740,8 @@ def run_audit(ctx, report: Path, failures: dict | None = None) -> dict:
         "auditor": auditor,
         "auditor_step_failed": auditor is None,
         "failures": failures,
-        "unmatched_numbers": check_report.unmatched_numbers(report.read_text(), state) if report.exists() else None,
+        "unmatched_numbers": check_report.unmatched_numbers(
+            report.read_text(), state, ctx.paths.project / config.BASELINE_METRICS) if report.exists() else None,
         "check_round": selected_round_checks(ctx),
     }
     records.write_json(state / "audit.json", audit)
@@ -867,7 +868,7 @@ def check_start(ctx, plan_only: bool = False) -> None:
 
 def clean_up_after_a_stop(ctx) -> None:
     """Cancel the job of an earlier loop job that stopped without a cancel, close its open wave,
-    and write the missing history rows."""
+    count the GPU minutes of its confirmation jobs, and write the missing history rows."""
     leftover = ctx.paths.state / "current_job"
     if leftover.exists():
         job = leftover.read_text().strip()
@@ -878,6 +879,7 @@ def clean_up_after_a_stop(ctx) -> None:
         folder = wave_dir(ctx, wave)
         if (folder / "tasks.tsv").exists() and not (folder / "outcome.json").exists():
             close_interrupted_wave(ctx, wave)
+    finish.count_pending_jobs(ctx)
     write_missing_rows(ctx)
 
 
