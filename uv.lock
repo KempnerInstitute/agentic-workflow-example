@@ -784,7 +784,7 @@ wheels = [
 
 [[package]]
 name = "pruning-example"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-15-pruning-example-cpu' and extra == 'extra-15-pruning-example-gpu')" },
