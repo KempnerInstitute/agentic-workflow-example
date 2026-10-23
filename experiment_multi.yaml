@@ -1,7 +1,7 @@
 # Settings and limits of the multi-agent design.
 # Read this file before you start the multi-agent loop job: it sets the roles, the models, the effort levels,
-# and the budget. The sections target (val_accuracy), baseline, and round must agree with experiment.yaml;
-# a test checks this.
+# and the budget. The sections target (val_accuracy), baseline, and round (except constraint) must agree with
+# experiment.yaml; a test checks this.
 
 target:
   val_accuracy: 0.905        # accuracy threshold: 0.900 plus a margin for noise in 5,000 validation images
@@ -20,7 +20,7 @@ round:
   batch_size: 256
   momentum: 0.9
   time_minutes: 10           # must agree with --time in slurm/round.sbatch and slurm/round_array.sbatch
-  # constraint: a100-mig     # optional: replaces the --constraint line of the round job scripts
+  # constraint: a100|h100|h200|rtx6000pro   # optional: full GPUs in place of the MIG slices of slurm/round_array.sbatch
 
 wave:
   size: 3                    # configurations in each wave; fewer when a limit allows fewer

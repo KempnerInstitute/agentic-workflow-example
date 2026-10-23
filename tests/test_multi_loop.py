@@ -469,6 +469,8 @@ def test_experiment_files_agree():
     multi = yaml.safe_load((REPO / "experiment_multi.yaml").read_text())
     assert multi["target"]["val_accuracy"] == single["target"]["val_accuracy"]
     assert multi["baseline"] == single["baseline"]
+    for experiment in (single, multi):
+        experiment["round"].pop("constraint", None)  # the GPUs can differ; the other round settings cannot
     assert multi["round"] == single["round"]
     multi_loop.check_roles(multi)
     assert multi["roles"]["planner"]["model"] != multi["roles"]["critic"]["model"]

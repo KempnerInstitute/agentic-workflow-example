@@ -250,7 +250,7 @@ Claude Code 2.1.302 to 2.1.309 (the multi-agent loop: 2.1.307 to 2.1.309), uv 0.
 ## Adapt the example
 
 - **Task.** Change the data, the model, the metric, the round configuration schema, the accuracy threshold, and the limits.
-- **GPUs.** To run the round jobs on other GPUs, set `round.constraint` in the experiment file, for example `a100-mig`. The loop scripts pass it to `sbatch`, and it replaces the `--constraint` line of the job scripts. A MIG slice is 3 to 4 times slower than a full GPU, so set `gpu_minutes` to match.
+- **GPUs.** To run the round jobs on other GPUs, set `round.constraint` in the experiment file. For example, set `a100-mig` in `experiment.yaml` for MIG slices, or `a100|h100|h200|rtx6000pro` in `experiment_multi.yaml` for full GPUs. The loop scripts pass it to `sbatch`, and it replaces the `--constraint` line of the job scripts. A MIG slice is 3 to 4 times slower than a full GPU, so set `gpu_minutes` to match.
 - **Changes.** Commit each change to a tracked file. The jobs refuse to start while a tracked file has changes.
 - **Keep.** Keep the fixed evaluator, the read-only agent step, and the loop script that submits the jobs. Also keep the limits outside the model, the run records, the confirmation round, and the one-time test evaluation.
 
