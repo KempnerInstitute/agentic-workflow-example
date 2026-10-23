@@ -13,7 +13,7 @@ import subprocess
 TOKEN_FIELDS = ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens")
 READ_ONLY_TOOLS = "Read,Grep,Glob"
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
-# The README holds the results of our runs. An unattended step must find its own way, so it cannot read them.
+# The README holds example results. An unattended step must find its own way, so it cannot read them.
 UNATTENDED_SETTINGS = {"permissions": {"deny": ["Read(./README.md)"]}}
 
 

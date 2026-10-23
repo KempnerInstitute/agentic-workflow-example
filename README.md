@@ -111,7 +111,7 @@ The round checkpoints are in `RUN_ROOT` on scratch storage. FASRC deletes scratc
 | Writes | The agent asks first. Deny rules block edits of tracked files and output folders. | None |
 | Shell | Sandbox on, SLURM commands outside it, `scancel` and `rm -r` blocked by a hook | No shell |
 | Job submission | `sbatch` asks | The loop script submits |
-| Reads | File tools: only the project folder. Sandboxed commands: not the home folder. | Only the project folder, and not this README, which holds the results of our runs |
+| Reads | File tools: only the project folder. Sandboxed commands: not the home folder. | Only the project folder, and not this README, which holds example results |
 | Integrity | The round job and the loop script stop if a tracked file changed | The same |
 
 ## Skills
@@ -125,7 +125,6 @@ The project has three skills in `.claude/skills/`. Claude Code loads a skill whe
 | `testing-and-continuous-integration` | The Coding Agent Skills page of the handbook | Practices for tests and CI. Useful when you change the code or the tests. |
 
 - In this example, only the interactive session of round 1 can use the skills. The agent step in the loop has only the Read, Grep, and Glob tools, so it cannot load a skill.
-- In our run, round 1 used `check-round`. The rounds did not use the two handbook skills.
 - Read each skill before you trust the project folder, because Claude Code follows its instructions.
 
 To update the two handbook skills, download them again, and commit the change. The round job stops if a tracked file changed.
@@ -175,7 +174,7 @@ sbatch slurm/multi_loop.sbatch                               # 3. run the waves 
 | Final steps | One confirmation seed, a draft report | Two confirmation seeds and 3-seed means, a draft report, the auditor, `check_report`, and `check_round` |
 | Records | `state/` | `state_multi/`, with `waves/`, `hypotheses.tsv`, and `audit.json` |
 
-To audit the report of the single-agent loop, run `STATE_DIR=state sbatch slurm/multi_loop.sbatch --audit-only`. To compare designs, run each one in its own clone with only the baseline and round 1; see [Our comparison runs](#our-comparison-runs).
+To audit the report of the single-agent loop, run `STATE_DIR=state sbatch slurm/multi_loop.sbatch --audit-only`. To compare designs, run each one in its own clone with only the baseline and round 1; see [Comparison of the designs](#comparison-of-the-designs).
 
 ## Test the loop with small limits
 
@@ -214,55 +213,39 @@ src/pruning_example/      code: data, model, evaluator, pruning, records, loops,
 tests/                    pytest tests
 ```
 
-## Our run
+## Example results
 
-One full run on October 17, 2026. Round 1 was supervised. The loop job ran rounds 2 to 15 and stopped at the round limit.
-
-| Round | Sparsity | Steps | Epochs | Learning rate | Excluded | Validation accuracy | Weights left |
-|---|---|---|---|---|---|---|---|
-| 1 | 0.5 | 1 | 2 | 0.01 | none | 0.9320 | 50% |
-| 2 | 0.85 | 2 | 4 | 0.01 | none | 0.9356 | 15% |
-| 3 | 0.95 | 3 | 6 | 0.01 | conv1 | 0.9180 | 5.0% |
-| 5 | 0.98 | 5 | 10 | 0.01 | conv1 | 0.9074 | 2.0% |
-| 7 | 0.988 | 5 | 20 | 0.01 | conv1 | 0.9052 | 1.2% |
-| 8 | 0.989 | 4 | 20 | 0.01 | conv1 | 0.8976 (below) | 1.1% |
-| 10 | 0.9895 | 5 | 20 | 0.03 | conv1 | 0.9154 | 1.07% |
-| 15 | 0.9927 | 5 | 20 | 0.08 | conv1 | 0.9076 | 0.75% |
-
-From round 9, the agent raised the learning rate by 0.01 in each round. This kept the threshold at higher sparsities.
+One run of the single-agent loop with the default settings. Your results can differ.
 
 | Result | Value |
 |---|---|
-| Selected model | Round 15: 83,215 nonzero weights (0.75%), sparse size 1.56 MB (dense: 44.7 MB) |
-| Test accuracy | 0.9045 (95% interval 0.899 to 0.910) |
+| Rounds | Round 1 supervised, rounds 2 to 15 in the loop job. The loop stopped at the round limit. |
+| Selected model | Round 15: sparsity 0.9927 in 5 steps, 20 epochs, learning rate 0.08, `conv1` kept dense. 83,215 nonzero weights (0.75%), sparse size 1.56 MB (dense: 44.7 MB). |
+| Accuracy | Validation 0.9076, test 0.9045 (95% interval 0.899 to 0.910) |
 | Confirmation round (seed 1) | Validation 0.9050, test 0.9032 |
 | Tokens | 323,072, estimated cost $1.11 |
 | GPU minutes | 16.1 for the rounds, 1.0 for the confirmation round |
 | Time of the loop job | 66 minutes |
 
-The confirmation round passed exactly at the threshold, and both test values are close to 0.900. Read the result as a lead to check, not as a finding.
+## Comparison of the designs
 
-## Our comparison runs
-
-Three designs, one run of each, on October 23, 2026. Each started from the same baseline and round 1, with the same search limits. The chapter [Multi-Agent Workflow Example](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/multi_agent_example.html) gives the details.
+Each design ran one time, from the same baseline and round 1, with the same search limits. A result holds if its 3-seed means are at least 0.905 for validation and 0.900 for test. The chapter [Multi-Agent Workflow Example](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/multi_agent_example.html) gives the details.
 
 | Result | One agent, one round at a time | One agent, waves of 3 | Planner and critic, waves of 3 |
 |---|---|---|---|
 | Selected round | Round 9: 0.700% weights left | Round 16: 0.485% | Round 21: 0.661% |
 | Means of 3 seeds: validation, test | 0.9043, 0.9001 | 0.9038, 0.8978 | 0.9049, 0.9017 |
-| Result holds (0.905 and 0.900) | No | No | No |
+| Result holds | No | No | No |
 | Rounds after round 1, time of the search | 14, 62 minutes | 21, 45 minutes | 21, 52 minutes |
 | Tokens, estimated cost, audit included | 783,766, $2.79 | 879,101, $4.22 | 1,348,571, $5.99 |
 
-- **Result.** No result held, so the runs could not show a gain. In each design, the selected round passed with seed 0, but its 3-seed mean of the validation accuracy was below 0.905.
+- **Result.** No result holds, so the comparison shows no gain from the extra agents. Each selected round passed with seed 0, but its 3-seed mean of the validation accuracy was below 0.905.
 - **Critic.** It accepted all 21 configurations.
-- **Auditor.** In the reports of the two designs with waves, it found wrong claims that `check_report` did not find.
+- **Auditor.** In the reports of both wave designs, it found wrong claims that `check_report` did not find.
 
 ## Tested with
 
-Claude Code 2.1.302, uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04, on A100, H100, H200, and RTX PRO 6000 GPUs, in October 2026.
-
-The multi-agent version passed its unit tests and its cluster tests of the loop mechanics, with Claude Code 2.1.307 to 2.1.309 on A100 MIG slices, in October 2026. The comparison runs used Claude Code 2.1.309.
+Claude Code 2.1.302 to 2.1.309 (the multi-agent loop: 2.1.307 to 2.1.309), uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04. GPUs: A100 (full GPUs and 3g.20gb MIG slices), H100, H200, and RTX PRO 6000.
 
 ## Adapt the example
 
