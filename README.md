@@ -175,7 +175,7 @@ sbatch slurm/multi_loop.sbatch                               # 3. run the waves 
 | Final steps | One confirmation seed, a draft report | Two confirmation seeds and 3-seed means, a draft report, the auditor, `check_report`, and `check_round` |
 | Records | `state/` | `state_multi/`, with `waves/`, `hypotheses.tsv`, and `audit.json` |
 
-To audit the report of the single-agent loop, run `STATE_DIR=state sbatch slurm/multi_loop.sbatch --audit-only`. To compare the two designs, run each one in its own clone with only the baseline and round 1.
+To audit the report of the single-agent loop, run `STATE_DIR=state sbatch slurm/multi_loop.sbatch --audit-only`. To compare designs, run each one in its own clone with only the baseline and round 1; see [Our comparison runs](#our-comparison-runs).
 
 ## Test the loop with small limits
 
@@ -242,11 +242,27 @@ From round 9, the agent raised the learning rate by 0.01 in each round. This kep
 
 The confirmation round passed exactly at the threshold, and both test values are close to 0.900. Read the result as a lead to check, not as a finding.
 
+## Our comparison runs
+
+Three designs, one run of each, on October 23, 2026. Each started from the same baseline and round 1, with the same search limits. The chapter [Multi-Agent Workflow Example](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/multi_agent_example.html) gives the details.
+
+| Result | One agent, one round at a time | One agent, waves of 3 | Planner and critic, waves of 3 |
+|---|---|---|---|
+| Selected round | Round 9: 0.700% weights left | Round 16: 0.485% | Round 21: 0.661% |
+| Means of 3 seeds: validation, test | 0.9043, 0.9001 | 0.9038, 0.8978 | 0.9049, 0.9017 |
+| Result holds (0.905 and 0.900) | No | No | No |
+| Rounds after round 1, time of the search | 14, 62 minutes | 21, 45 minutes | 21, 52 minutes |
+| Tokens, estimated cost, audit included | 783,766, $2.79 | 879,101, $4.22 | 1,348,571, $5.99 |
+
+- **Result.** No result held, so the runs could not show a gain. In each design, the selected round passed with seed 0, but its 3-seed mean of the validation accuracy was below 0.905.
+- **Critic.** It accepted all 21 configurations.
+- **Auditor.** In the reports of the two designs with waves, it found wrong claims that `check_report` did not find.
+
 ## Tested with
 
 Claude Code 2.1.302, uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04, on A100, H100, H200, and RTX PRO 6000 GPUs, in October 2026.
 
-The multi-agent version passed its unit tests and its cluster tests of the loop mechanics, with Claude Code 2.1.307 to 2.1.309 on A100 MIG slices, in October 2026. Its runs are still to come.
+The multi-agent version passed its unit tests and its cluster tests of the loop mechanics, with Claude Code 2.1.307 to 2.1.309 on A100 MIG slices, in October 2026. The comparison runs used Claude Code 2.1.309.
 
 ## Adapt the example
 
