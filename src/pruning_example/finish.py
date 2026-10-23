@@ -81,6 +81,15 @@ def job_accounting(ctx, job: str) -> Accounting:
         return Accounting("UNKNOWN", float(ctx.experiment["round"]["time_minutes"]), 0)
 
 
+def refuse_after_final_steps(ctx) -> None:
+    """Refuse a new search in a state folder whose final steps are done. Its test set is used, and its
+    selection is saved, so new rounds would not change the result."""
+    path = ctx.paths.state / "summary.json"
+    if path.exists() and records.read_json(path).get("final_steps_done"):
+        raise SystemExit(f"The final steps of {ctx.paths.state.name}/ are done. To search again, use a new state "
+                         "folder (STATE_DIR). To run the final steps again, use --finish.")
+
+
 def round_job_options(ctx) -> tuple:
     """Return the sbatch options of each round job. An optional round.constraint in the experiment file
     replaces the --constraint line of the job scripts, so that all designs of a comparison use the same GPUs."""

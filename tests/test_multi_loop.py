@@ -674,3 +674,25 @@ def test_round_constraint_reaches_the_array_jobs(multi):
     ctx.experiment["round"]["constraint"] = "a100-mig"
     assert multi_loop.run(ctx, "loop") == 0
     assert slurm.options == [("--constraint=a100-mig",)] * 2  # the wave and the confirmation rounds
+
+
+def test_a_state_folder_with_final_steps_done_refuses_a_new_search(multi):
+    slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL - n))
+    ctx, code = plan_then_run(multi, FakeRoles(), slurm, max_round_attempts=4)
+    assert code == 0
+    for mode in ("loop", "plan_only"):
+        again = context(multi, FakeRoles(), slurm)
+        again.plan_only = mode == "plan_only"
+        with pytest.raises(SystemExit, match="final steps of state_multi/ are done"):
+            multi_loop.run(again, mode)
+    assert multi_loop.run(context(multi, FakeRoles(), slurm), "finish") == 0  # --finish still works
+
+
+def test_plan_only_says_when_a_role_step_failed(multi):
+    messages = []
+    ctx = context(multi, FakeRoles(fail={"planner"}), FakeArraySlurm(state_of(multi), lambda n, kind, seed: None))
+    ctx.plan_only = True
+    ctx.log = messages.append
+    assert multi_loop.run(ctx, "plan_only") == 1
+    assert any("a role step failed" in message for message in messages)
+    assert not any("Read state_multi/waves/wave_01/plan.md" in message for message in messages)

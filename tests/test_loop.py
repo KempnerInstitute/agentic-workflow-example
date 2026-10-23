@@ -454,3 +454,12 @@ def test_round_constraint_in_the_experiment_file_reaches_each_round_job(started)
     ctx.experiment["round"]["constraint"] = "a100-mig"
     assert loop.run_rounds(ctx) == "plateau"
     assert slurm.options and all(options == ("--constraint=a100-mig",) for options in slurm.options)
+
+
+def test_a_state_folder_with_final_steps_done_refuses_a_new_search(started, monkeypatch):
+    monkeypatch.setattr(finish, "evaluate_on_test_set", lambda ctx, kind, n: {"test_accuracy": 0.902, "kind": kind})
+    slurm = FakeSlurm(started / "state", lambda n: (0.91, SMALL))
+    assert loop.run(context(started, FakeAgent(lambda call: GOOD), slurm, plateau_rounds=1)) == 0
+    with pytest.raises(SystemExit, match="final steps of state/ are done"):
+        loop.run(context(started, FakeAgent(lambda call: GOOD), slurm, plateau_rounds=1))
+    assert loop.run(context(started, FakeAgent(lambda call: GOOD), slurm), finish_only=True) == 0  # --finish still works

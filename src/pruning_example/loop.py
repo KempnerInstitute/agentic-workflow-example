@@ -284,8 +284,9 @@ def check_time_lines(ctx: Context, scripts: tuple[str, ...]) -> None:
 
 
 def check_start(ctx: Context) -> None:
-    """Refuse to start without the baseline and round 1, or with settings that do not agree."""
+    """Refuse to start without the baseline and round 1, with settings that do not agree, or after the final steps."""
     project = ctx.paths.project
+    finish.refuse_after_final_steps(ctx)
     if not (project / "state" / "baseline" / "metrics.json").exists():
         raise SystemExit("There is no baseline. Run 'sbatch slurm/baseline.sbatch' first.")
     if not (ctx.paths.state / "rounds" / "round_01" / "metrics.json").exists():
