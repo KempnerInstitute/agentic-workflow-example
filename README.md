@@ -170,7 +170,7 @@ sbatch slurm/multi_loop.sbatch                               # 3. run the waves 
 | Rounds | One round job at a time | Waves of up to 3 round jobs, as one array job (`slurm/round_array.sbatch`) |
 | GPUs | Full GPUs | A100 MIG slices (3g.20gb), 1 to 3 minutes for each round |
 | Checks | The schema | The schema and a repeat check in code, then the critic. One revision of a rejected configuration. |
-| Limits | 1,000,000 tokens, 60 GPU minutes, 15 round attempts | 1,250,000 tokens (450,000 kept for the writer and the auditor), 150 GPU minutes, 45 round attempts |
+| Limits | 1,000,000 tokens, 60 GPU minutes, 15 round attempts | 1,250,000 tokens (450,000 kept for the writer and the auditor; plan for 10% more), 150 GPU minutes, 45 round attempts |
 | Plateau | 3 rounds | 6 rounds |
 | Final steps | One confirmation seed, a draft report | Two confirmation seeds and 3-seed means, a draft report, the auditor, `check_report`, and `check_round` |
 | Records | `state/` | `state_multi/`, with `waves/`, `hypotheses.tsv`, and `audit.json` |
