@@ -247,6 +247,7 @@ The multi-agent version passed its unit tests and its cluster tests of the loop 
 ## Adapt the example
 
 - **Change** the task: the data, the model, the metric, the round configuration schema, the accuracy threshold, and the limits.
+- **GPUs.** To run the round jobs on other GPUs, set `round.constraint` in the experiment file, for example `a100-mig`. The loop scripts pass it to `sbatch`, and it replaces the `--constraint` line of the job scripts.
 - **Keep** the fixed evaluator, the read-only agent step, the loop script that submits the jobs, the limits outside the model, the run records, the confirmation round, and the one-time test evaluation.
 
 ## Sources

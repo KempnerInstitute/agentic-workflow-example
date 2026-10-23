@@ -67,8 +67,10 @@ class FakeSlurm:
         self.gpu_minutes = gpu_minutes
         self.submitted = []
         self.canceled = []
+        self.options = []
 
-    def submit(self, script, args, cwd):
+    def submit(self, script, args, cwd, options=()):
+        self.options.append(options)
         round_no = int(args[args.index("--round") + 1])
         kind = args[args.index("--kind") + 1] if "--kind" in args else "round"
         self.submitted.append((kind, round_no))
@@ -418,11 +420,11 @@ def test_the_next_loop_job_counts_the_round_job_that_a_stopped_one_canceled(star
 
 def test_finish_counts_the_confirmation_job_that_a_stopped_loop_job_canceled(started, monkeypatch):
     class StopInConfirmation(FakeSlurm):
-        def submit(self, script, args, cwd):
+        def submit(self, script, args, cwd, options=()):
             if "confirm" in args:  # the job starts, but writes no records before the stop
                 self.submitted.append(("confirm", int(args[args.index("--round") + 1])))
                 return str(1000 + len(self.submitted))
-            return super().submit(script, args, cwd)
+            return super().submit(script, args, cwd, options)
 
         def wait(self, job_id, queue_limit_seconds):
             if self.submitted[-1][0] == "confirm":
@@ -443,3 +445,12 @@ def test_finish_counts_the_confirmation_job_that_a_stopped_loop_job_canceled(sta
     assert rows[0] == ("interrupted", job)
     assert len(rows) == 2  # then the new confirmation round
     assert not (state / finish.PENDING_FILE).exists()
+
+
+def test_round_constraint_in_the_experiment_file_reaches_each_round_job(started):
+    slurm = FakeSlurm(started / "state", lambda n: (0.91, SMALL))
+    ctx = context(started, FakeAgent(lambda call: GOOD), slurm, plateau_rounds=1)
+    assert finish.round_job_options(ctx) == ()  # unset: the --constraint line of the job script applies
+    ctx.experiment["round"]["constraint"] = "a100-mig"
+    assert loop.run_rounds(ctx) == "plateau"
+    assert slurm.options and all(options == ("--constraint=a100-mig",) for options in slurm.options)

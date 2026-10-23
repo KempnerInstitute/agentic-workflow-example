@@ -109,8 +109,10 @@ class FakeArraySlurm:
         self.stop_on_wave = stop_on_wave
         self.arrays = []
         self.canceled = []
+        self.options = []
 
-    def submit_array(self, script, tasks_file, count, max_parallel, cwd):
+    def submit_array(self, script, tasks_file, count, max_parallel, cwd, options=()):
+        self.options.append(options)
         lines = [line.split("\t") for line in (Path(cwd) / tasks_file).read_text().splitlines()]
         assert len(lines) == count and script == "slurm/round_array.sbatch"
         job = str(900 + len(self.arrays))
@@ -511,7 +513,7 @@ def test_prediction_scores_next_to_baselines(multi):
 
 def test_a_failed_sbatch_is_a_failed_wave(multi):
     class NoSubmit(FakeArraySlurm):
-        def submit_array(self, script, tasks_file, count, max_parallel, cwd):
+        def submit_array(self, script, tasks_file, count, max_parallel, cwd, options=()):
             raise multi_loop.SlurmError("sbatch failed: invalid partition")
 
     ctx = context(multi, FakeRoles(), NoSubmit(state_of(multi), lambda n, kind, seed: (0.91, SMALL)))
@@ -661,3 +663,14 @@ def test_check_report_reads_the_baseline_metrics(tmp_path):
     report = "Round 4 keeps 0.9182 validation accuracy. The baseline has 0.937.\n"
     assert check_report.unmatched_numbers(report, state) == [{"number": "0.937", "line": 1}]
     assert check_report.unmatched_numbers(report, state, tmp_path / config.BASELINE_METRICS) == []
+
+
+def test_round_constraint_reaches_the_array_jobs(multi):
+    slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL - n))
+    planner = context(multi, FakeRoles(), slurm)
+    planner.plan_only = True
+    assert multi_loop.run(planner, "plan_only") == 0
+    ctx = context(multi, FakeRoles(), slurm, max_round_attempts=4)
+    ctx.experiment["round"]["constraint"] = "a100-mig"
+    assert multi_loop.run(ctx, "loop") == 0
+    assert slurm.options == [("--constraint=a100-mig",)] * 2  # the wave and the confirmation rounds

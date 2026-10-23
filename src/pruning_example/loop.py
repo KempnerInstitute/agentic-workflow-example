@@ -219,7 +219,8 @@ def run_attempt(ctx: Context, round_no: int) -> None:
         notes.write(f"## Round {round_no}\n\n{round_config['reason']}\n\n")
 
     try:
-        job = ctx.slurm.submit("slurm/round.sbatch", [str(config_path), "--round", str(round_no)], ctx.paths.project)
+        job = ctx.slurm.submit("slurm/round.sbatch", [str(config_path), "--round", str(round_no)], ctx.paths.project,
+                               options=finish.round_job_options(ctx))
     except (SlurmError, subprocess.TimeoutExpired) as error:
         fail(ctx, round_no, "sbatch_failed", str(error), round_config)
         return

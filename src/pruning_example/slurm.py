@@ -146,9 +146,10 @@ class Slurm:
             self.sleep(30)
         raise SlurmError("sbatch failed")
 
-    def submit_array(self, script: str, tasks_file: str, count: int, max_parallel: int, cwd) -> str:
+    def submit_array(self, script: str, tasks_file: str, count: int, max_parallel: int, cwd,
+                     options: tuple = ()) -> str:
         """Submit an array job with one task for each line of tasks_file, at most max_parallel at a time."""
-        return self.submit(script, [tasks_file], cwd, options=(f"--array=0-{count - 1}%{max_parallel}",))
+        return self.submit(script, [tasks_file], cwd, options=(f"--array=0-{count - 1}%{max_parallel}", *options))
 
     def queue_state(self, job_id: str) -> str | None:
         """Return the state of the job in the queue, or None if the job left the queue."""

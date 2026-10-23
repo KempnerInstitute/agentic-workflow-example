@@ -81,6 +81,13 @@ def job_accounting(ctx, job: str) -> Accounting:
         return Accounting("UNKNOWN", float(ctx.experiment["round"]["time_minutes"]), 0)
 
 
+def round_job_options(ctx) -> tuple:
+    """Return the sbatch options of each round job. An optional round.constraint in the experiment file
+    replaces the --constraint line of the job scripts, so that all designs of a comparison use the same GPUs."""
+    constraint = ctx.experiment["round"].get("constraint")
+    return (f"--constraint={constraint}",) if constraint else ()
+
+
 def note_pending_job(ctx, job: str, kind: str, round_no: int, tasks: int = 0) -> None:
     """Note a submitted job until its GPU minutes are in the ledger. tasks is the number of array tasks,
     or 0 for one job. If the loop job stops first, for example after scancel, the next loop job counts it."""
@@ -138,7 +145,7 @@ def confirmation_round(ctx, round_no: int) -> dict | None:
     config_path = state.relative_to(ctx.paths.project) / "rounds" / f"round_{round_no:02d}" / "config.json"
     args = [str(config_path), "--round", str(round_no), "--kind", "confirm", "--seed", "1"]
     try:
-        job = ctx.slurm.submit("slurm/round.sbatch", args, ctx.paths.project)
+        job = ctx.slurm.submit("slurm/round.sbatch", args, ctx.paths.project, options=round_job_options(ctx))
     except (SlurmError, subprocess.TimeoutExpired) as error:
         ctx.log(f"confirmation round: sbatch failed: {error}")
         return None
@@ -175,7 +182,7 @@ def confirmation_rounds(ctx, round_no: int, seeds: list[int]) -> dict[int, dict 
         max_parallel = ctx.experiment.get("wave", {}).get("max_parallel", len(missing))
         try:
             job = ctx.slurm.submit_array("slurm/round_array.sbatch", str(tasks.relative_to(project)),
-                                         len(missing), max_parallel, project)
+                                         len(missing), max_parallel, project, options=round_job_options(ctx))
         except (SlurmError, subprocess.TimeoutExpired) as error:
             ctx.log(f"confirmation rounds: sbatch failed: {error}")
         else:

@@ -20,6 +20,7 @@ round:
   batch_size: 256
   momentum: 0.9
   time_minutes: 10           # must agree with --time in slurm/round.sbatch and slurm/round_array.sbatch
+  # constraint: a100-mig     # optional: replaces the --constraint line of the round job scripts
 
 wave:
   size: 3                    # configurations in each wave; fewer when a limit allows fewer

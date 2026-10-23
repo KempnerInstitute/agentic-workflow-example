@@ -17,6 +17,7 @@ round:
   batch_size: 256
   momentum: 0.9
   time_minutes: 10           # must agree with --time in slurm/round.sbatch
+  # constraint: a100-mig     # optional: replaces the --constraint line of the round job scripts
 
 budget:
   tokens: 1000000            # all four token types of all models, cache reads included

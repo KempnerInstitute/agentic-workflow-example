@@ -111,3 +111,17 @@ def test_a_canceled_waiting_run_after_a_requeue_is_the_last_run():
     task = parse_array_sacct(text)[0]
     assert task.state == "CANCELLED"
     assert task.gpu_minutes == 5.0 and task.runs == 1
+
+
+def test_submit_array_adds_more_options_after_the_range():
+    seen = []
+
+    def run(args, timeout=120, **kwargs):
+        seen.append(args)
+        return Result(0, out="778\n")
+
+    slurm = Slurm(sleep=lambda seconds: None)
+    slurm.run = run
+    slurm.submit_array("slurm/round_array.sbatch", "tasks.tsv", 2, 2, cwd=".", options=("--constraint=a100-mig",))
+    assert seen[0] == ["sbatch", "--parsable", "--array=0-1%2", "--constraint=a100-mig", "slurm/round_array.sbatch",
+                       "tasks.tsv"]

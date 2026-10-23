@@ -573,7 +573,8 @@ def submit_wave(ctx, wave: int, accepted: list[dict]) -> int:
     write_notes(ctx, wave, [{**entry, "round": submitted.get(entry["item"])} for entry in plan["entries"]])
     try:
         job = ctx.slurm.submit_array("slurm/round_array.sbatch", str(rel(ctx, folder / "tasks.tsv")), len(lines),
-                                     ctx.experiment["wave"]["max_parallel"], project)
+                                     ctx.experiment["wave"]["max_parallel"], project,
+                                     options=finish.round_job_options(ctx))
     except (SlurmError, subprocess.TimeoutExpired) as error:
         for round_no, round_config in rounds:
             records.append_history(state, records.history_row(round_no, "sbatch_failed", round_config, None,
