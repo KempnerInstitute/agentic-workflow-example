@@ -140,38 +140,42 @@ git diff --stat .claude/skills
 
 ## Multi-agent version
 
-The multi-agent loop runs the same task with four agent roles. Each role step is one read-only `claude -p` call with its own model and effort level. The loop script still checks each output, submits the jobs, and writes all records. The chapter [Multi-Agent Workflow Example](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/multi_agent_example.html) of the handbook describes this version step by step.
+Four agent roles run the same task. The loop script still checks each output, submits the jobs, and writes all records. The chapter [Multi-Agent Workflow Example](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/multi_agent_example.html) describes it step by step.
 
 | Role | Model | Effort | Task |
 |---|---|---|---|
-| Planner | `claude-opus-5-5` | `xhigh` | Plans each wave: 3 configurations, each with a hypothesis, a predicted validation accuracy, and a pass probability |
+| Planner | `claude-opus-5-5` | `xhigh` | Plans 3 configurations for each wave |
 | Critic | `claude-sonnet-5-5` | `high` | Accepts or rejects each configuration before any GPU job runs |
 | Writer | `claude-sonnet-5-5` | `medium` | Writes the draft report |
-| Auditor | `claude-opus-5-5` | `max` | Checks each claim of the draft report against the records |
+| Auditor | `claude-opus-5-5` | `max` | Checks each claim of the report against the records |
 
-`experiment_multi.yaml` sets these values; change them there. A checker uses a different model from the role that it checks. With `roles.critic.enabled: false`, the loop is one agent that plans waves of 3. The role prompts are in `prompts/multi/roles/`.
+`experiment_multi.yaml` sets the roles, the waves, and the limits. With `roles.critic.enabled: false`, one agent plans the waves.
 
-Run it after the setup, the baseline, and round 1 above:
+After the setup, the baseline, and round 1 above:
 
 ```bash
 source cluster.env
-sbatch --time=01:30:00 slurm/multi_loop.sbatch --plan-only   # plan wave 1, then stop
-cat state_multi/waves/wave_01/plan.md                        # read the plan and the critic's verdicts
-sbatch slurm/multi_loop.sbatch                               # run wave 1 and the next waves
+sbatch --time=01:30:00 slurm/multi_loop.sbatch --plan-only   # 1. plan wave 1, then stop
+cat state_multi/waves/wave_01/plan.md                        # 2. read the plan
+sbatch slurm/multi_loop.sbatch                               # 3. run the waves and the final steps
 ```
 
-To plan wave 1 again, remove `state_multi/waves/wave_01/`, and run the `--plan-only` job again. Watch the run with `tail -f logs/prune-multi-loop_<job_id>.out`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its array job, and the next loop job counts its GPU minutes. To run the final steps later, run `sbatch slurm/multi_loop.sbatch --finish`.
+- **Plan again.** Remove `state_multi/waves/wave_01/`, and run step 1 again.
+- **Watch.** Run `tail -f logs/prune-multi-loop_<job_id>.out`.
+- **Stop.** Run `scancel <job_id>` on the loop job. The next loop job counts the GPU minutes of the canceled tasks.
+- **Finish later.** Run `sbatch slurm/multi_loop.sbatch --finish`.
 
-What changes from the single-agent loop:
+| Part | Single-agent loop | Multi-agent loop |
+|---|---|---|
+| Rounds | One round job at a time | Waves of up to 3 round jobs, as one array job (`slurm/round_array.sbatch`) |
+| GPUs | Full GPUs | A100 MIG slices (3g.20gb), 1 to 3 minutes for each round |
+| Checks | The schema | The schema and a repeat check in code, then the critic. One revision of a rejected configuration. |
+| Limits | 1,000,000 tokens, 60 GPU minutes, 15 round attempts | 1,250,000 tokens (450,000 kept for the writer and the auditor), 150 GPU minutes, 45 round attempts |
+| Plateau | 3 rounds | 6 rounds |
+| Final steps | One confirmation seed, a draft report | Two confirmation seeds and 3-seed means, a draft report, the auditor, `check_report`, and `check_round` |
+| Records | `state/` | `state_multi/`, with `waves/`, `hypotheses.tsv`, and `audit.json` |
 
-- **Waves.** Each wave is one array job of up to 3 round jobs (`slurm/round_array.sbatch`). The loop script writes the history rows of a wave in round order.
-- **GPUs.** The round jobs run on A100 MIG slices (3g.20gb). A round is small, and the slices are often free when the full GPUs are busy. A round takes 1 to 3 minutes on a slice, 3 to 4 times longer than on a full GPU.
-- **Checks.** The code checks each configuration first: the schema, and no repeat. Then the critic checks it. A rejected configuration gets one revision. If the revision is rejected too, it is dropped.
-- **Limits.** 1,250,000 tokens, with 36% (450,000) kept for the writer and the auditor, so the search can use 800,000. 150 GPU minutes on MIG slices: the loop script starts a round only if the round's 10-minute time limit still fits. 45 round attempts. The loop stops after 6 rounds in a row without a smaller passing model.
-- **Final steps.** Two confirmation rounds, with seeds 1 and 2, as one array job. The summary gives the mean validation accuracy and the mean test accuracy of the 3 seeds. Then the writer step, the auditor step, `check_report` (the numbers of the report against the records), and the checks of `check_round` for the selected round.
-- **Records.** `state_multi/`, with `waves/wave_NN/` (the plan, the tasks, and the outcome), `hypotheses.tsv` (each prediction and its result), `audit.json`, and a ledger with the model and the effort level of each step.
-
-To check the report of the single-agent loop the same way, run `STATE_DIR=state sbatch slurm/multi_loop.sbatch --audit-only`. To compare the two designs, run each one in its own clone that holds only the baseline and round 1. Then the agents of one design cannot read the records of the other.
+To audit the report of the single-agent loop, run `STATE_DIR=state sbatch slurm/multi_loop.sbatch --audit-only`. To compare the two designs, run each one in its own clone with only the baseline and round 1.
 
 ## Test the loop with small limits
 
