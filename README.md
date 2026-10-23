@@ -74,7 +74,7 @@ source cluster.env
 sbatch slurm/loop.sbatch
 ```
 
-Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its own round job and writes `state/summary.json`. The next loop job counts the GPU minutes of the canceled job. To run the final steps later, run `sbatch slurm/loop.sbatch --finish`.
+Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its own round job and writes `state/summary.json`. The next loop job counts the GPU minutes of the canceled job. To run the final steps later, run `sbatch slurm/loop.sbatch --finish`. If round jobs end at the time limit with no epoch line in their logs, check the storage of `DATA_DIR`.
 
 ## Limits
 
@@ -140,7 +140,7 @@ git diff --stat .claude/skills
 
 ## Multi-agent version
 
-The multi-agent loop runs the same task with four agent roles. Each role step is one read-only `claude -p` call with its own model and effort level. The loop script still checks each output, submits the jobs, and writes all records.
+The multi-agent loop runs the same task with four agent roles. Each role step is one read-only `claude -p` call with its own model and effort level. The loop script still checks each output, submits the jobs, and writes all records. The chapter [Multi-Agent Workflow Example](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/multi_agent_example.html) of the handbook describes this version step by step.
 
 | Role | Model | Effort | Task |
 |---|---|---|---|
@@ -242,7 +242,7 @@ The confirmation round passed exactly at the threshold, and both test values are
 
 Claude Code 2.1.302, uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04, on A100, H100, H200, and RTX PRO 6000 GPUs, in October 2026.
 
-The multi-agent version passed its unit tests and its cluster tests of the loop mechanics, with Claude Code 2.1.307 and 2.1.308 on A100 MIG slices, in October 2026. Its runs are still to come.
+The multi-agent version passed its unit tests and its cluster tests of the loop mechanics, with Claude Code 2.1.307 to 2.1.309 on A100 MIG slices, in October 2026. Its runs are still to come.
 
 ## Adapt the example
 
