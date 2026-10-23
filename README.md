@@ -74,7 +74,7 @@ source cluster.env
 sbatch slurm/loop.sbatch
 ```
 
-Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its own round job and writes `state/summary.json`. The next loop job counts the GPU minutes of the canceled job. To run the final steps later, run `sbatch slurm/loop.sbatch --finish`. If round jobs end at the time limit with no epoch line in their logs, check the storage of `DATA_DIR`.
+Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its own round job and writes `state/summary.json`. The next loop job counts the GPU minutes of the canceled job. To run the final steps later, run `sbatch slurm/loop.sbatch --finish`. After the final steps, use a new state folder to search again. If round jobs end at the time limit with no epoch line in their logs, check the storage of `DATA_DIR`.
 
 ## Limits
 
@@ -162,8 +162,8 @@ sbatch slurm/multi_loop.sbatch                               # 3. run the waves 
 
 - **Plan again.** Remove `state_multi/waves/wave_01/`, and run step 1 again.
 - **Watch.** Run `tail -f logs/prune-multi-loop_<job_id>.out`.
-- **Stop.** Run `scancel <job_id>` on the loop job. The next loop job counts the GPU minutes of the canceled tasks.
-- **Finish later.** Run `sbatch slurm/multi_loop.sbatch --finish`.
+- **Stop.** Run `scancel <job_id>` on the loop job. Check with `squeue --me` that no `prune-round` task is left. The next loop job counts the GPU minutes of the canceled tasks.
+- **Finish later.** Run `sbatch slurm/multi_loop.sbatch --finish`. After the final steps, use a new state folder to search again.
 
 | Part | Single-agent loop | Multi-agent loop |
 |---|---|---|
@@ -251,7 +251,8 @@ The multi-agent version passed its unit tests and its cluster tests of the loop 
 ## Adapt the example
 
 - **Change** the task: the data, the model, the metric, the round configuration schema, the accuracy threshold, and the limits.
-- **GPUs.** To run the round jobs on other GPUs, set `round.constraint` in the experiment file, for example `a100-mig`. The loop scripts pass it to `sbatch`, and it replaces the `--constraint` line of the job scripts.
+- **GPUs.** To run the round jobs on other GPUs, set `round.constraint` in the experiment file, for example `a100-mig`. The loop scripts pass it to `sbatch`, and it replaces the `--constraint` line of the job scripts. A MIG slice is 3 to 4 times slower than a full GPU, so set `gpu_minutes` to match.
+- **Commit** each change to a tracked file. The jobs refuse to start while a tracked file has changes.
 - **Keep** the fixed evaluator, the read-only agent step, the loop script that submits the jobs, the limits outside the model, the run records, the confirmation round, and the one-time test evaluation.
 
 ## Sources
