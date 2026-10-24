@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from pruning_example import config, finish, loop, metrics, records
-from pruning_example.agent import AgentFormatError, tokens_used
+from pruning_example.agent import (
+    AgentFormatError, ModelCheckError, UNATTENDED_SETTINGS, check_model, command, step_env, tokens_used,
+)
 from pruning_example.slurm import Accounting, Slurm, SlurmError, parse_sacct
 
 GOOD = {"sparsity": 0.98, "steps": 4, "finetune_epochs": 16, "lr": 0.02, "weight_decay": 0.0005,
@@ -63,8 +67,10 @@ class FakeSlurm:
         self.gpu_minutes = gpu_minutes
         self.submitted = []
         self.canceled = []
+        self.options = []
 
-    def submit(self, script, args, cwd):
+    def submit(self, script, args, cwd, options=()):
+        self.options.append(options)
         round_no = int(args[args.index("--round") + 1])
         kind = args[args.index("--kind") + 1] if "--kind" in args else "round"
         self.submitted.append((kind, round_no))
@@ -98,6 +104,8 @@ def context(project, agent, slurm, plateau_rounds: int = 100, **budget) -> loop.
     experiment = config.load_experiment(project)
     experiment["target"] = {**TARGET, "plateau_rounds": plateau_rounds}
     experiment["budget"].update(budget)
+    for step in ("agent_step", "report_step"):  # the fake agent reports model-a; test_model_check covers the check
+        experiment[step].pop("model", None)
     return loop.Context(paths=paths, experiment=experiment, schema_text=(project / config.SCHEMA_PATH).read_text(),
                         agent=agent, slurm=slurm, ledger=loop.Ledger(paths.state / "ledger.tsv"),
                         log=lambda message: None)
@@ -308,3 +316,150 @@ def test_sigterm_in_the_final_steps_keeps_the_stop_reason(started, monkeypatch):
     assert summary["stop_reason"] == "plateau"  # --finish can use it later
     assert summary["terminated"] is True
     assert summary["final_steps_done"] is False
+
+
+def test_model_check_stops_the_loop(started):
+    ctx = context(started, FakeAgent(lambda call: GOOD), FakeSlurm(started / "state", lambda n: (0.91, SMALL)))
+    ctx.experiment["agent_step"]["model"] = "claude-opus-5-5"  # the fake agent reports model-a
+    assert loop.run_rounds(ctx) == "model_check"
+    assert ctx.ledger.tokens == 50_000  # the step still counts
+
+
+def test_check_model_skips_aliases_and_accepts_suffixes():
+    result = {"modelUsage": {"claude-opus-5-5[1m]": {}, "claude-haiku-4-5": {}}}
+    check_model(result, "claude-opus-5-5")
+    check_model(result, "opus")  # an alias names no fixed model
+    check_model(result, None)
+    with pytest.raises(ModelCheckError, match="not the configured model claude-sonnet-5-5"):
+        check_model(result, "claude-sonnet-5-5")
+    check_model({"modelUsage": {"claude-opus-4-5-20251101": {}}}, "claude-opus-4-5")  # a dated name
+    with pytest.raises(ModelCheckError):
+        check_model({"modelUsage": {"claude-opus-5-5": {}}}, "claude-opus-5")  # another model, not a dated name
+
+
+def test_a_job_without_accounting_counts_its_time_limit(started):
+    class NoAccounting(FakeSlurm):
+        def accounting(self, job_id):
+            raise SlurmError(f"sacct has no record of job {job_id}")
+
+    ctx = context(started, FakeAgent(lambda call: GOOD), NoAccounting(started / "state", lambda n: (0.89, SMALL)),
+                  max_round_attempts=2)
+    assert loop.run_rounds(ctx) == "round_limit"
+    assert ctx.ledger.gpu_minutes == 10.0  # the time limit of the round job, so the GPU budget stays safe
+
+
+def test_gpu_reservation_starts_a_round_only_if_its_time_limit_fits(started):
+    slurm = FakeSlurm(started / "state", lambda n: (0.89, SMALL), gpu_minutes=8.0)
+    ctx = context(started, FakeAgent(lambda call: GOOD), slurm, gpu_minutes=60, gpu_reservation=True)
+    assert loop.run_rounds(ctx) == "gpu_budget"
+    assert ctx.ledger.gpu_minutes == 56.0  # 48 + 10 fitted in 60; 56 + 10 does not
+    ctx = context(started, FakeAgent(lambda call: GOOD), slurm, gpu_minutes=60)
+    assert loop.stop_reason(ctx) is None  # the rule of chapter 28 starts one more round, because 56 is below 60
+
+
+def test_the_ledger_of_chapter_28_keeps_its_columns(tmp_path):
+    ledger = loop.Ledger(tmp_path / "ledger.tsv")
+    ledger.add(round=2, kind="agent_step", tokens=100, wave=1, model="m")
+    assert (tmp_path / "ledger.tsv").read_text().splitlines()[0].split("\t") == loop.LEDGER_FIELDS
+    assert ledger.tokens == 100
+
+
+def test_command_adds_the_model_the_effort_the_role_prompt_and_the_readme_rule():
+    caps = {"max_turns": 8, "max_budget_usd": 1.0, "timeout_minutes": 15}
+    args = command("prompt", caps)
+    assert "--model" not in args and "--effort" not in args and "--append-system-prompt-file" not in args
+    assert json.loads(args[args.index("--settings") + 1]) == UNATTENDED_SETTINGS
+    assert "Read(./README.md)" in UNATTENDED_SETTINGS["permissions"]["deny"]
+    args = command("prompt", {**caps, "model": "claude-opus-5-5", "effort": "xhigh",
+                              "role_prompt": "prompts/multi/roles/planner.md"}, schema_text="{}")
+    assert args[args.index("--model") + 1] == "claude-opus-5-5"
+    assert args[args.index("--effort") + 1] == "xhigh"
+    assert args[args.index("--append-system-prompt-file") + 1] == "prompts/multi/roles/planner.md"
+    assert args[-2:] == ["--json-schema", "{}"]
+
+
+def test_the_effort_variable_is_removed_only_when_the_step_sets_an_effort(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "low")  # it would override --effort
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "not-a-real-key")
+    assert "CLAUDE_CODE_EFFORT_LEVEL" not in step_env({"effort": "high"})
+    assert step_env({})["CLAUDE_CODE_EFFORT_LEVEL"] == "low"
+    assert "ANTHROPIC_API_KEY" not in step_env({}) and "ANTHROPIC_API_KEY" not in step_env({"effort": "high"})
+
+
+def test_record_paths_of_confirmation_seeds(tmp_path):
+    assert records.record_dir(tmp_path, "round", 7) == tmp_path / "rounds" / "round_07"
+    assert records.record_dir(tmp_path, "confirm", 7) == tmp_path / "confirm" / "round_07"
+    assert records.record_dir(tmp_path, "confirm", 7, 1) == tmp_path / "confirm" / "round_07"
+    assert records.record_dir(tmp_path, "confirm", 7, 2) == tmp_path / "confirm" / "round_07_seed2"
+    assert records.test_eval_path(tmp_path, "confirm", 7, 2) == tmp_path / "test_eval" / "confirm_07_seed2.json"
+    assert records.test_eval_path(tmp_path, "round", 7) == tmp_path / "test_eval" / "round_07.json"
+
+
+# GPU minutes of jobs that a stopped loop job did not count
+
+def test_the_next_loop_job_counts_the_round_job_that_a_stopped_one_canceled(started, monkeypatch):
+    class StoppedSlurm(FakeSlurm):
+        def wait(self, job_id, queue_limit_seconds):
+            raise loop.Terminated()
+
+    monkeypatch.setattr(loop.signal, "signal", lambda *args: None)  # keep the signal handlers of pytest
+    state = started / "state"
+    assert loop.run(context(started, FakeAgent(lambda call: GOOD), StoppedSlurm(state, lambda n: None))) == 1
+    assert (state / finish.PENDING_FILE).read_text() == "1001\tround\t2\t0\n"  # not in the ledger yet
+
+    monkeypatch.setattr(finish, "evaluate_on_test_set", lambda ctx, kind, n: {"test_accuracy": 0.902, "kind": kind})
+    slurm = FakeSlurm(state, lambda n: (0.93, 1_000_000), gpu_minutes=1.5)
+    ctx = context(started, FakeAgent(lambda call: GOOD), slurm, max_round_attempts=1)
+    assert loop.run(ctx) == 0
+    assert slurm.canceled == ["1001"]  # in case it still runs
+    rows = [(row["round"], row["kind"], row["status"]) for row in ctx.ledger.rows if row["kind"] in ("round", "confirm")]
+    assert rows == [("2", "round", "interrupted"), ("1", "confirm", "ended")]
+    assert ctx.ledger.gpu_minutes == 1.5  # the canceled round counts against the GPU budget
+    assert not (state / finish.PENDING_FILE).exists()
+
+
+def test_finish_counts_the_confirmation_job_that_a_stopped_loop_job_canceled(started, monkeypatch):
+    class StopInConfirmation(FakeSlurm):
+        def submit(self, script, args, cwd, options=()):
+            if "confirm" in args:  # the job starts, but writes no records before the stop
+                self.submitted.append(("confirm", int(args[args.index("--round") + 1])))
+                return str(1000 + len(self.submitted))
+            return super().submit(script, args, cwd, options)
+
+        def wait(self, job_id, queue_limit_seconds):
+            if self.submitted[-1][0] == "confirm":
+                raise loop.Terminated()
+            return "ended"
+
+    monkeypatch.setattr(loop.signal, "signal", lambda *args: None)
+    state = started / "state"
+    stopped = StopInConfirmation(state, lambda n: (0.91, SMALL))
+    assert loop.run(context(started, FakeAgent(lambda call: GOOD), stopped, plateau_rounds=1)) == 1
+    job = stopped.canceled[0]
+    assert (state / finish.PENDING_FILE).read_text().startswith(f"{job}\tconfirm\t")
+
+    monkeypatch.setattr(finish, "evaluate_on_test_set", lambda ctx, kind, n: {"test_accuracy": 0.902, "kind": kind})
+    ctx = context(started, FakeAgent(lambda call: GOOD), FakeSlurm(state, lambda n: (0.91, SMALL)))
+    assert loop.run(ctx, finish_only=True) == 0
+    rows = [(row["status"], row["job_id"]) for row in ctx.ledger.rows if row["kind"] == "confirm"]
+    assert rows[0] == ("interrupted", job)
+    assert len(rows) == 2  # then the new confirmation round
+    assert not (state / finish.PENDING_FILE).exists()
+
+
+def test_round_constraint_in_the_experiment_file_reaches_each_round_job(started):
+    slurm = FakeSlurm(started / "state", lambda n: (0.91, SMALL))
+    ctx = context(started, FakeAgent(lambda call: GOOD), slurm, plateau_rounds=1)
+    assert finish.round_job_options(ctx) == ()  # unset: the --constraint line of the job script applies
+    ctx.experiment["round"]["constraint"] = "a100-mig"
+    assert loop.run_rounds(ctx) == "plateau"
+    assert slurm.options and all(options == ("--constraint=a100-mig",) for options in slurm.options)
+
+
+def test_a_state_folder_with_final_steps_done_refuses_a_new_search(started, monkeypatch):
+    monkeypatch.setattr(finish, "evaluate_on_test_set", lambda ctx, kind, n: {"test_accuracy": 0.902, "kind": kind})
+    slurm = FakeSlurm(started / "state", lambda n: (0.91, SMALL))
+    assert loop.run(context(started, FakeAgent(lambda call: GOOD), slurm, plateau_rounds=1)) == 0
+    with pytest.raises(SystemExit, match="final steps of state/ are done"):
+        loop.run(context(started, FakeAgent(lambda call: GOOD), slurm, plateau_rounds=1))
+    assert loop.run(context(started, FakeAgent(lambda call: GOOD), slurm), finish_only=True) == 0  # --finish still works

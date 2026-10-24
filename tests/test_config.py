@@ -49,9 +49,9 @@ def test_finetune_epochs_must_be_at_least_steps():
 
 
 def test_experiment_file_can_point_to_a_test_copy(project, monkeypatch):
-    test_copy = project / "calibration" / "small_limits.yaml"
+    test_copy = project / "local" / "small_limits.yaml"
     test_copy.parent.mkdir()
     test_copy.write_text((project / "experiment.yaml").read_text().replace("tokens: 1000000", "tokens: 100000"))
     assert load_experiment(project)["budget"]["tokens"] == 1_000_000
-    monkeypatch.setenv("EXPERIMENT_FILE", "calibration/small_limits.yaml")
+    monkeypatch.setenv("EXPERIMENT_FILE", "local/small_limits.yaml")
     assert load_experiment(project)["budget"]["tokens"] == 100_000

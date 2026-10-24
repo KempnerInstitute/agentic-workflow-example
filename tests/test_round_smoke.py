@@ -62,3 +62,19 @@ def test_check_round_finds_a_changed_record(project, capsys):
     records.write_json(project / "state" / "rounds" / "round_01" / "metrics.json", result)
     assert check_round.main(["1"]) == 1
     assert "DIFF" in capsys.readouterr().out
+
+
+def test_a_round_without_history_and_a_confirmation_with_seed_2(project):
+    (project / BASELINE_MODEL).parent.mkdir(parents=True)
+    torch.save(build_model().state_dict(), project / BASELINE_MODEL)
+    (project / "agent").mkdir()
+    (project / "agent" / "next_config.json").write_text(json.dumps(CONFIG))
+
+    run_round.main(["agent/next_config.json", "--round", "3", "--no-history"])  # the multi-agent loop writes the row
+    assert (project / "state" / "rounds" / "round_03" / "metrics.json").exists()
+    assert records.read_history(project / "state") == []
+
+    run_round.main(["state/rounds/round_03/config.json", "--round", "3", "--kind", "confirm", "--seed", "2"])
+    result = records.read_json(project / "state" / "confirm" / "round_03_seed2" / "metrics.json")
+    assert result["seed"] == 2 and result["kind"] == "confirm"
+    assert not (project / "state" / "confirm" / "round_03").exists()  # seed 1 keeps its own folder

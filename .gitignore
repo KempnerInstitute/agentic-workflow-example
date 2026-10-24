@@ -7,9 +7,10 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 
-# Outputs of the jobs and the loop script
+# Outputs of the jobs and the loop scripts
 logs/
 state/
+state_multi/
 agent/
 results/
 

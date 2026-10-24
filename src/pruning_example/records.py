@@ -137,9 +137,31 @@ def next_round(state: Path) -> int:
     return max((int(row["round"]) for row in read_history(state)), default=0) + 1
 
 
-def history_row(round_no: int, status: str, round_config: dict | None, result: dict | None, note: str = "") -> dict:
-    """Return one row of history.tsv from a configuration and a result."""
-    row = {"round": round_no, "status": status, "job_id": job_id(), "note": note}
+def record_dir(state: Path, kind: str, round_no: int, seed: int | None = None) -> Path:
+    """Return the record folder of a round or of a confirmation round.
+
+    A confirmation round with seed 1 keeps the path of a single confirmation round. Seed S of 2 or more
+    adds _seedS, so that confirmation rounds that run at the same time write to different folders.
+    """
+    if kind == "round":
+        return state / "rounds" / f"round_{round_no:02d}"
+    suffix = f"_seed{seed}" if seed is not None and seed >= 2 else ""
+    return state / "confirm" / f"round_{round_no:02d}{suffix}"
+
+
+def test_eval_path(state: Path, kind: str, round_no: int, seed: int | None = None) -> Path:
+    """Return the file of the one-time test evaluation of a model."""
+    suffix = f"_seed{seed}" if kind == "confirm" and seed is not None and seed >= 2 else ""
+    return state / "test_eval" / f"{kind}_{round_no:02d}{suffix}.json"
+
+
+def history_row(round_no: int, status: str, round_config: dict | None, result: dict | None, note: str = "",
+                job: str | None = None) -> dict:
+    """Return one row of history.tsv from a configuration and a result.
+
+    job is the ID of the round job. Without it, the row gets the ID of the job that writes the row.
+    """
+    row = {"round": round_no, "status": status, "job_id": job or job_id(), "note": note}
     if round_config:
         row.update({key: round_config.get(key, "") for key in ("sparsity", "steps", "finetune_epochs", "lr", "weight_decay")})
         row["exclude_layers"] = ",".join(round_config.get("exclude_layers", [])) or "none"

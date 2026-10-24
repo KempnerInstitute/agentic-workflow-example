@@ -1,14 +1,15 @@
 """Entry point of the round job: prune, fine-tune, and evaluate one configuration.
 
-Usage: python -m pruning_example.run_round CONFIG [--round N] [--kind round|confirm] [--seed S]
+Usage: python -m pruning_example.run_round CONFIG [--round N] [--kind round|confirm] [--seed S] [--no-history]
 
 The job saves a checkpoint after each epoch. After a requeue, the job continues from the checkpoint.
+With --no-history, the job does not write its row of history.tsv. The multi-agent loop script writes
+the rows of round jobs that run at the same time, so that their rows cannot mix.
 """
 
 from __future__ import annotations
 
 import argparse
-import shutil
 import time
 from pathlib import Path
 
@@ -28,12 +29,13 @@ def parse(argv=None):
     parser.add_argument("--round", type=int, default=None, help="round number (default: the next round)")
     parser.add_argument("--kind", choices=["round", "confirm"], default="round")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--no-history", action="store_true", help="do not write the row of history.tsv")
     return parser.parse_args(argv)
 
 
 def finish_records(paths, args, round_no, record_dir, round_config) -> None:
     """Make sure that history.tsv has the row of a complete round. A requeue can stop a job between steps."""
-    if args.kind != "round":
+    if args.kind != "round" or args.no_history:
         return
     if any(int(row["round"]) == round_no for row in records.read_history(paths.state)):
         return
@@ -57,7 +59,7 @@ def main(argv=None) -> None:
         round_no = args.round or records.next_round(paths.state)
         records.write_json(folder / "round.json", {"round": round_no, "kind": args.kind})
         records.write_json(folder / "config.json", round_config)
-    record_dir = paths.state / ("rounds" if args.kind == "round" else "confirm") / f"round_{round_no:02d}"
+    record_dir = records.record_dir(paths.state, args.kind, round_no, args.seed)
     if (record_dir / "metrics.json").exists():
         done = records.read_json(record_dir / "run_meta.json")
         if done["job_id"] != records.job_id():
@@ -144,9 +146,8 @@ def main(argv=None) -> None:
     meta["end"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     records.write_json(folder / "metrics.json", result)
     records.write_json(folder / "run_meta.json", meta)
-    record_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("config.json", "run_meta.json", "metrics.json"):
-        shutil.copyfile(folder / name, record_dir / name)
+    for name in ("config.json", "run_meta.json", "metrics.json"):  # metrics.json last: it marks a complete round
+        records.write_json(record_dir / name, records.read_json(folder / name))
     finish_records(paths, args, round_no, record_dir, round_config)
     checkpoint.unlink(missing_ok=True)
     print(f"round {round_no}: val_accuracy={val_accuracy:.4f} weights_left={counts['weights_left']:.6f} "

@@ -1,0 +1,46 @@
+{
+  "title": "Critic review",
+  "type": "object",
+  "properties": {
+    "verdicts": {
+      "type": "array",
+      "minItems": 1,
+      "description": "One verdict for each configuration, by its item number.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The item number of the configuration."
+          },
+          "accept": {
+            "type": "boolean",
+            "description": "True to run the configuration, false to reject it."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 400,
+            "description": "Why you accept or reject it."
+          }
+        },
+        "required": [
+          "item",
+          "accept",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 600,
+      "description": "Your review of the wave in a few sentences."
+    }
+  },
+  "required": [
+    "verdicts",
+    "summary"
+  ],
+  "additionalProperties": false
+}

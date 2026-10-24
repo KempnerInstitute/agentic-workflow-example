@@ -12,6 +12,8 @@ A Claude Code agent prunes a ResNet-18 model for CIFAR-10 on the Kempner AI clus
 
 In the unattended phase, the agent has read-only tools. It cannot run commands, write files, or submit jobs. The loop script, which is committed code, does these tasks.
 
+A second version of the loop uses four agent roles and runs 3 rounds at a time; see [Multi-agent version](#multi-agent-version).
+
 ## Before you start
 
 - A Kempner AI cluster account, and a SLURM account that can use `kempner_requeue` and `shared`.
@@ -72,7 +74,7 @@ source cluster.env
 sbatch slurm/loop.sbatch
 ```
 
-Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its own round job and writes `state/summary.json`. To run the final steps later, run `sbatch slurm/loop.sbatch --finish`.
+Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv`. To stop the run, run `scancel <job_id>` on the loop job. The loop script cancels its own round job and writes `state/summary.json`. The next loop job counts the GPU minutes of the canceled job. To run the final steps later, run `sbatch slurm/loop.sbatch --finish`. After the final steps, use a new state folder to search again. If round jobs end at the time limit with no epoch line in their logs, check the storage of `DATA_DIR`.
 
 ## Limits
 
@@ -80,7 +82,7 @@ Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv
 |---|---|
 | Accuracy threshold | Validation accuracy of at least 0.905. The loop looks for the fewest weights that keep it, and stops after 3 rounds in a row without a smaller passing model. |
 | Tokens | 1,000,000 for the unattended phase, with 10% kept for the report step. All four token types count, cache reads too. |
-| Agent step | `--max-turns 8`, `--max-budget-usd 1.00`, read-only tools, `dontAsk` |
+| Agent step | `claude-opus-5-5` at the `medium` effort level, `--max-turns 8`, `--max-budget-usd 1.00`, read-only tools, `dontAsk`. The loop script stops if a step used another model. |
 | Rounds | 15 round attempts, round 1 included |
 | GPU | 60 GPU minutes for the unattended phase. One round job at a time, 1 GPU, 10 minutes at most. |
 | Queue | A job can wait at most 45 minutes in the queue |
@@ -91,6 +93,7 @@ Watch the run with `tail -f logs/prune-loop_<job_id>.out` and `state/history.tsv
 | File | Content |
 |---|---|
 | `state/summary.json` | Stop reason, totals, the selected round, both seeds, validation and test accuracy with 95% intervals |
+| `state/selection.json` | The selected round, saved before the confirmation round, so that `--finish` keeps it |
 | `state/final_report.md` | The draft report of the agent. Check each number against the other files. |
 | `state/history.tsv` | One row for each round attempt |
 | `state/ledger.tsv` | Tokens of each agent step, and GPU minutes of each job |
@@ -108,7 +111,7 @@ The round checkpoints are in `RUN_ROOT` on scratch storage. FASRC deletes scratc
 | Writes | The agent asks first. Deny rules block edits of tracked files and output folders. | None |
 | Shell | Sandbox on, SLURM commands outside it, `scancel` and `rm -r` blocked by a hook | No shell |
 | Job submission | `sbatch` asks | The loop script submits |
-| Reads | File tools: only the project folder. Sandboxed commands: not the home folder. | Only the project folder |
+| Reads | File tools: only the project folder. Sandboxed commands: not the home folder. | Only the project folder, and not this README, which holds example results |
 | Integrity | The round job and the loop script stop if a tracked file changed | The same |
 
 ## Skills
@@ -122,7 +125,6 @@ The project has three skills in `.claude/skills/`. Claude Code loads a skill whe
 | `testing-and-continuous-integration` | The Coding Agent Skills page of the handbook | Practices for tests and CI. Useful when you change the code or the tests. |
 
 - In this example, only the interactive session of round 1 can use the skills. The agent step in the loop has only the Read, Grep, and Glob tools, so it cannot load a skill.
-- In our run, round 1 used `check-round`. The rounds did not use the two handbook skills.
 - Read each skill before you trust the project folder, because Claude Code follows its instructions.
 
 To update the two handbook skills, download them again, and commit the change. The round job stops if a tracked file changed.
@@ -134,6 +136,45 @@ for skill in reproducible-research testing-and-continuous-integration; do
 done
 git diff --stat .claude/skills
 ```
+
+## Multi-agent version
+
+Four agent roles run the same task. The loop script still checks each output, submits the jobs, and writes all records. The chapter [Multi-Agent Workflow Example](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/multi_agent_example.html) describes it step by step.
+
+| Role | Model | Effort | Task |
+|---|---|---|---|
+| Planner | `claude-opus-5-5` | `xhigh` | Plans 3 configurations for each wave |
+| Critic | `claude-sonnet-5-5` | `high` | Accepts or rejects each configuration before any GPU job runs |
+| Writer | `claude-sonnet-5-5` | `medium` | Writes the draft report |
+| Auditor | `claude-opus-5-5` | `max` | Checks each claim of the report against the records |
+
+`experiment_multi.yaml` sets the roles, the waves, and the limits. With `roles.critic.enabled: false`, one agent plans the waves.
+
+After the setup, the baseline, and round 1 above:
+
+```bash
+source cluster.env
+sbatch --time=01:30:00 slurm/multi_loop.sbatch --plan-only   # 1. plan wave 1, then stop
+cat state_multi/waves/wave_01/plan.md                        # 2. read the plan
+sbatch slurm/multi_loop.sbatch                               # 3. run the waves and the final steps
+```
+
+- **Plan again.** Remove `state_multi/waves/wave_01/`, and run step 1 again.
+- **Watch.** Run `tail -f logs/prune-multi-loop_<job_id>.out`.
+- **Stop.** Run `scancel <job_id>` on the loop job. Check with `squeue --me` that no `prune-round` task is left. The next loop job counts the GPU minutes of the canceled tasks.
+- **Finish later.** Run `sbatch slurm/multi_loop.sbatch --finish`. After the final steps, use a new state folder to search again.
+
+| Part | Single-agent loop | Multi-agent loop |
+|---|---|---|
+| Rounds | One round job at a time | Waves of up to 3 round jobs, as one array job (`slurm/round_array.sbatch`) |
+| GPUs | Full GPUs | A100 MIG slices (3g.20gb), 1 to 3 minutes for each round |
+| Checks | The schema | The schema and a repeat check in code, then the critic. One revision of a rejected configuration. |
+| Limits | 1,000,000 tokens, 60 GPU minutes, 15 round attempts | 1,250,000 tokens (450,000 kept for the writer and the auditor; plan for 10% more), 150 GPU minutes, 45 round attempts |
+| Plateau | 3 rounds | 6 rounds |
+| Final steps | One confirmation seed, a draft report | Two confirmation seeds and 3-seed means, a draft report, the auditor, `check_report`, and `check_round` |
+| Records | `state/` | `state_multi/`, with `waves/`, `hypotheses.tsv`, and `audit.json` |
+
+To audit the report of the single-agent loop, run `STATE_DIR=state sbatch slurm/multi_loop.sbatch --audit-only`. To compare designs, run each one in its own clone with only the baseline and round 1; see [Comparison of the designs](#comparison-of-the-designs).
 
 ## Test the loop with small limits
 
@@ -160,57 +201,63 @@ The tests use generated images, so they need no GPU and no data. CI runs them wi
 ```text
 AGENTS.md, CLAUDE.md      agent instructions
 experiment.yaml           accuracy threshold, recipe, and limits
+experiment_multi.yaml     roles, models, effort levels, waves, and limits of the multi-agent loop
 cluster.env.example       your account and paths
 .claude/                  settings, hook, and skills
-configs/                  round configuration schema and an example
+configs/                  schemas of a round configuration, a wave plan, a review, and an audit
 prompts/                  prompts of the agent step and the report step
+prompts/multi/            role prompts and task prompts of the multi-agent loop
 data/split.json           fixed validation split
-slurm/                    baseline, round, and loop jobs
-src/pruning_example/      code: data, model, evaluator, pruning, records, loop, final steps
+slurm/                    baseline, round, round array, loop, and multi-agent loop jobs
+src/pruning_example/      code: data, model, evaluator, pruning, records, loops, final steps, checks
 tests/                    pytest tests
 ```
 
-## Our run
+## Example results
 
-One full run on October 17, 2026. Round 1 was supervised. The loop job ran rounds 2 to 15 and stopped at the round limit.
-
-| Round | Sparsity | Steps | Epochs | Learning rate | Excluded | Validation accuracy | Weights left |
-|---|---|---|---|---|---|---|---|
-| 1 | 0.5 | 1 | 2 | 0.01 | none | 0.9320 | 50% |
-| 2 | 0.85 | 2 | 4 | 0.01 | none | 0.9356 | 15% |
-| 3 | 0.95 | 3 | 6 | 0.01 | conv1 | 0.9180 | 5.0% |
-| 5 | 0.98 | 5 | 10 | 0.01 | conv1 | 0.9074 | 2.0% |
-| 7 | 0.988 | 5 | 20 | 0.01 | conv1 | 0.9052 | 1.2% |
-| 8 | 0.989 | 4 | 20 | 0.01 | conv1 | 0.8976 (below) | 1.1% |
-| 10 | 0.9895 | 5 | 20 | 0.03 | conv1 | 0.9154 | 1.07% |
-| 15 | 0.9927 | 5 | 20 | 0.08 | conv1 | 0.9076 | 0.75% |
-
-From round 9, the agent raised the learning rate by 0.01 in each round. This kept the threshold at higher sparsities.
+One run of the single-agent loop with the default settings. Your results can differ.
 
 | Result | Value |
 |---|---|
-| Selected model | Round 15: 83,215 nonzero weights (0.75%), sparse size 1.56 MB (dense: 44.7 MB) |
-| Test accuracy | 0.9045 (95% interval 0.899 to 0.910) |
+| Rounds | Round 1 supervised, rounds 2 to 15 in the loop job. The loop stopped at the round limit. |
+| Selected model | Round 15: sparsity 0.9927 in 5 steps, 20 epochs, learning rate 0.08, `conv1` kept dense. 83,215 nonzero weights (0.75%), sparse size 1.56 MB (dense: 44.7 MB). |
+| Accuracy | Validation 0.9076, test 0.9045 (95% interval 0.899 to 0.910) |
 | Confirmation round (seed 1) | Validation 0.9050, test 0.9032 |
 | Tokens | 323,072, estimated cost $1.11 |
 | GPU minutes | 16.1 for the rounds, 1.0 for the confirmation round |
 | Time of the loop job | 66 minutes |
 
-The confirmation round passed exactly at the threshold, and both test values are close to 0.900. Read the result as a lead to check, not as a finding.
+## Comparison of the designs
+
+Each design ran one time, from the same baseline and round 1, with the same search limits. A result holds if its 3-seed means are at least 0.905 for validation and 0.900 for test. The chapter [Multi-Agent Workflow Example](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/multi_agent_example.html) gives the details.
+
+| Result | One agent, one round at a time | One agent, waves of 3 | Planner and critic, waves of 3 |
+|---|---|---|---|
+| Selected round | Round 9: 0.700% weights left | Round 16: 0.485% | Round 21: 0.661% |
+| Means of 3 seeds: validation, test | 0.9043, 0.9001 | 0.9038, 0.8978 | 0.9049, 0.9017 |
+| Result holds | No | No | No |
+| Rounds after round 1, time of the search | 14, 62 minutes | 21, 45 minutes | 21, 52 minutes |
+| Tokens, estimated cost, audit included | 783,766, $2.79 | 879,101, $4.22 | 1,348,571, $5.99 |
+
+- **Result.** No result holds, so the comparison shows no gain from the extra agents. Each selected round passed with seed 0, but its 3-seed mean of the validation accuracy was below 0.905.
+- **Critic.** It accepted all 21 configurations.
+- **Auditor.** In the reports of both wave designs, it found wrong claims that `check_report` did not find.
 
 ## Tested with
 
-Claude Code 2.1.302, uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04, on A100, H100, H200, and RTX PRO 6000 GPUs, in October 2026.
+Claude Code 2.1.302 to 2.1.309 (the multi-agent loop: 2.1.307 to 2.1.309), uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04. GPUs: A100 (full GPUs and 3g.20gb MIG slices), H100, H200, and RTX PRO 6000.
 
 ## Adapt the example
 
-- **Change** the task: the data, the model, the metric, the round configuration schema, the accuracy threshold, and the limits.
-- **Keep** the fixed evaluator, the read-only agent step, the loop script that submits the jobs, the limits outside the model, the run records, the confirmation round, and the one-time test evaluation.
+- **Task.** Change the data, the model, the metric, the round configuration schema, the accuracy threshold, and the limits.
+- **GPUs.** To run the round jobs on other GPUs, set `round.constraint` in the experiment file. For example, set `a100-mig` in `experiment.yaml` for MIG slices, or `a100|h100|h200|rtx6000pro` in `experiment_multi.yaml` for full GPUs. The loop scripts pass it to `sbatch`, and it replaces the `--constraint` line of the job scripts. A MIG slice is 3 to 4 times slower than a full GPU, so set `gpu_minutes` to match.
+- **Changes.** Commit each change to a tracked file. The jobs refuse to start while a tracked file has changes.
+- **Keep.** Keep the fixed evaluator, the read-only agent step, and the loop script that submits the jobs. Also keep the limits outside the model, the run records, the confirmation round, and the one-time test evaluation.
 
 ## Sources
 
-The skills in `.claude/skills/reproducible-research/` and `.claude/skills/testing-and-continuous-integration/`, and the hook `.claude/hooks/guard.sh`, come from the Kempner Institute Computing Handbook.
+The skills in `.claude/skills/reproducible-research/` and `.claude/skills/testing-and-continuous-integration/` come from [Coding Agent Skills](https://handbook.eng.kempnerinstitute.harvard.edu/s2_swe_for_research/coding_agent_skills.html) in the Kempner Institute Computing Handbook. The hook `.claude/hooks/guard.sh` comes from [Hooks](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/configuring_agents.html#hooks) in the same handbook.
 
 ## License
 
-MIT. Copyright (c) 2026 Harvard University. See `LICENSE`. To cite this example, see `CITATION.cff`.
+MIT. Copyright (c) 2026 Harvard University. See [LICENSE](LICENSE). To cite this example, see [CITATION.cff](CITATION.cff).

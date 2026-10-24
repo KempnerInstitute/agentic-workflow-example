@@ -1,6 +1,6 @@
 [project]
 name = "pruning-example"
-version = "0.1.0"
+version = "0.2.0"
 description = "End-to-end agentic workflow example: a Claude Code agent prunes ResNet-18 on CIFAR-10 on the Kempner AI cluster."
 readme = "README.md"
 license = "MIT"

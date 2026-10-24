@@ -20,7 +20,7 @@ def project(tmp_path, monkeypatch) -> Path:
     """Return a temporary project folder: a Git repository with the committed settings and DATA_DIR=fake."""
     folder = tmp_path / "project"
     folder.mkdir()
-    for name in ("experiment.yaml", ".gitignore"):
+    for name in ("experiment.yaml", "experiment_multi.yaml", ".gitignore"):
         shutil.copy(REPO / name, folder / name)
     for name in ("configs", "prompts", "slurm"):
         shutil.copytree(REPO / name, folder / name)
@@ -31,6 +31,6 @@ def project(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("PROJECT_DIR", str(folder))
     monkeypatch.setenv("RUN_ROOT", str(tmp_path / "runs"))
     monkeypatch.setenv("DATA_DIR", "fake")
-    for name in ("STATE_DIR", "SLURM_JOB_ID", "SLURM_RESTART_COUNT"):
+    for name in ("STATE_DIR", "EXPERIMENT_FILE", "SLURM_JOB_ID", "SLURM_RESTART_COUNT"):
         monkeypatch.delenv(name, raising=False)
     return folder
