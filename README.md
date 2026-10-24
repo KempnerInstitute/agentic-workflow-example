@@ -256,8 +256,8 @@ Claude Code 2.1.302 to 2.1.309 (the multi-agent loop: 2.1.307 to 2.1.309), uv 0.
 
 ## Sources
 
-The skills in `.claude/skills/reproducible-research/` and `.claude/skills/testing-and-continuous-integration/`, and the hook `.claude/hooks/guard.sh`, come from the Kempner Institute Computing Handbook.
+The skills in `.claude/skills/reproducible-research/` and `.claude/skills/testing-and-continuous-integration/` come from [Coding Agent Skills](https://handbook.eng.kempnerinstitute.harvard.edu/s2_swe_for_research/coding_agent_skills.html) in the Kempner Institute Computing Handbook. The hook `.claude/hooks/guard.sh` comes from [Hooks](https://handbook.eng.kempnerinstitute.harvard.edu/s5b_agentic_ai_workflows/configuring_agents.html#hooks) in the same handbook.
 
 ## License
 
-MIT. Copyright (c) 2026 Harvard University. See `LICENSE`. To cite this example, see `CITATION.cff`.
+MIT. Copyright (c) 2026 Harvard University. See [LICENSE](LICENSE). To cite this example, see [CITATION.cff](CITATION.cff).
