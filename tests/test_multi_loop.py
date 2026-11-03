@@ -697,8 +697,8 @@ def test_round_partition_and_constraint_reach_the_array_jobs(multi):
 
 def test_plan_only_stops_before_any_role_step_if_slurm_would_reject_the_array_jobs(multi):
     slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: None)
-    slurm.test_errors["slurm/round_array.sbatch"] = ("sbatch: error: Batch job submission failed: "
-                                                     "Invalid partition name specified")
+    slurm.test_errors["slurm/round_array.sbatch"] = ("sbatch: error: invalid partition specified: kempner_interactiv\n"
+                                                     "allocation failure: Invalid partition name specified")
     agent = FakeRoles()
     ctx = context(multi, agent, slurm)
     ctx.plan_only = True

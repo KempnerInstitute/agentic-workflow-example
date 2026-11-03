@@ -468,8 +468,7 @@ def test_round_partition_and_constraint_in_the_experiment_file_reach_each_round_
 
 def test_the_loop_job_stops_before_any_agent_step_if_slurm_would_reject_the_round_jobs(started):
     slurm = FakeSlurm(started / "state", lambda n: (0.91, SMALL))
-    slurm.test_errors["slurm/round.sbatch"] = ("sbatch: error: Batch job submission failed: "
-                                               "Requested node configuration is not available")
+    slurm.test_errors["slurm/round.sbatch"] = "allocation failure: Requested node configuration is not available"
     agent = FakeAgent(lambda call: GOOD)
     ctx = context(started, agent, slurm)
     ctx.experiment["round"]["partition"] = "kempner_interactive"  # the script asks for full GPUs, which it has not

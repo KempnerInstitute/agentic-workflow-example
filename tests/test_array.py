@@ -133,12 +133,12 @@ def test_pending_reasons_gives_each_reason_once_or_unknown():
 
 
 def test_test_only_returns_slurms_error_and_raises_only_for_a_busy_controller():
-    answers = iter([
-        Result(0, err="sbatch: Job 1 to start at 2026-11-02T10:00:00 using 8 processors on nodes holygpu8a19505 "
-                      "in partition kempner_interactive"),
-        Result(1, err="sbatch: error: Batch job submission failed: Requested node configuration is not available"),
-        Result(1, err="sbatch: error: Batch job submission failed: Socket timed out on send/recv operation"),
-        Result(1, err="sbatch: error: Batch job submission failed: Unable to contact slurm controller (connect failure)"),
+    answers = iter([  # the messages of sbatch --test-only on the cluster
+        Result(0, err="sbatch: Job 57206233 to start at 2026-11-03T01:02:51 using 8 processors on nodes "
+                      "holygpu8a19603 in partition kempner_interactive"),
+        Result(1, err="allocation failure: Requested node configuration is not available"),
+        Result(1, err="allocation failure: Socket timed out on send/recv operation"),
+        Result(1, err="allocation failure: Unable to contact slurm controller (connect failure)"),
     ])
     seen = []
 

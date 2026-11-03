@@ -178,7 +178,7 @@ To audit the report of the single-agent loop, run `STATE_DIR=state sbatch slurm/
 
 ## Run on kempner_interactive
 
-You can run the GPU jobs of this example on `kempner_interactive` in batch mode, because each job is short and uses one GPU. The partition has only A100 MIG slices (3g.20gb), and each user can use one GPU at a time. The job scripts ask for `kempner_requeue`, and `slurm/baseline.sbatch` and `slurm/round.sbatch` ask for full GPUs, so set the partition and the constraint.
+You can run the GPU jobs of this example on `kempner_interactive` in batch mode, because each job is short and uses one GPU. The partition has only A100 MIG slices (3g.20gb), and each user can use one GPU at a time. The job scripts ask for `kempner_requeue`, and `slurm/baseline.sbatch` and `slurm/round.sbatch` ask for full GPUs. On `kempner_interactive`, SLURM rejects these two scripts with `Requested node configuration is not available`, so set the partition and the constraint.
 
 Do the setup above, but use these steps in place of the baseline and round 1 commands:
 
@@ -189,7 +189,7 @@ Do the setup above, but use these steps in place of the baseline and round 1 com
 
    ```bash
    source cluster.env
-   sbatch --partition=kempner_interactive --constraint=a100-mig slurm/baseline.sbatch
+   sbatch --partition=kempner_interactive --constraint=a100-mig slurm/baseline.sbatch   # about 5 minutes on a MIG slice
    ```
 
 5. Run round 1 in the `test` partition, as in [Round 1](#round-1-supervised). In the prompt, write the command as `sbatch --wait --partition=kempner_interactive --constraint=a100-mig slurm/round.sbatch agent/next_config.json`. Refuse the command if it does not have these two options.
@@ -268,7 +268,7 @@ Each design ran one time, from the same baseline and round 1, with the same sear
 
 ## Tested with
 
-Claude Code 2.1.302 to 2.1.309 (the multi-agent loop: 2.1.307 to 2.1.309), uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04. GPUs: A100 (full GPUs and 3g.20gb MIG slices), H100, H200, and RTX PRO 6000.
+Claude Code 2.1.302 to 2.1.317 (the multi-agent loop: 2.1.307 to 2.1.317), uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04. GPUs: A100 (full GPUs, and 3g.20gb MIG slices on `kempner_requeue` and `kempner_interactive`), H100, H200, and RTX PRO 6000.
 
 ## Adapt the example
 
