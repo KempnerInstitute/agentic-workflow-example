@@ -91,10 +91,11 @@ def refuse_after_final_steps(ctx) -> None:
 
 
 def round_job_options(ctx) -> tuple:
-    """Return the sbatch options of each round job. An optional round.constraint in the experiment file
-    replaces the --constraint line of the job scripts, so that all designs of a comparison use the same GPUs."""
-    constraint = ctx.experiment["round"].get("constraint")
-    return (f"--constraint={constraint}",) if constraint else ()
+    """Return the sbatch options of each round job. An optional round.partition and round.constraint in the
+    experiment file replace the --partition and --constraint lines of the job scripts, for example to run the
+    round jobs on kempner_interactive, or so that all designs of a comparison use the same GPUs."""
+    settings = ctx.experiment["round"]
+    return tuple(f"--{key}={settings[key]}" for key in ("partition", "constraint") if settings.get(key))
 
 
 def note_pending_job(ctx, job: str, kind: str, round_no: int, tasks: int = 0) -> None:
@@ -163,6 +164,8 @@ def confirmation_round(ctx, round_no: int) -> dict | None:
     ctx.log(f"confirmation round: submitted job {job}")
     outcome = ctx.slurm.wait(job, 60 * ctx.budget["queue_limit_minutes"])
     if outcome == "queue_limit":
+        ctx.log(f"confirmation round: job {job} waited longer than the queue limit "
+                f"(SLURM reason: {ctx.slurm.last_reasons})")
         ctx.slurm.cancel(job)
     usage = job_accounting(ctx, job)
     (state / "current_job").unlink(missing_ok=True)
@@ -198,7 +201,10 @@ def confirmation_rounds(ctx, round_no: int, seeds: list[int]) -> dict[int, dict 
             (state / "current_job").write_text(job + "\n")
             note_pending_job(ctx, job, "confirm", round_no, len(missing))
             ctx.log(f"confirmation rounds: submitted array job {job} for seeds {', '.join(map(str, missing))}")
-            outcome = ctx.slurm.wait_array(job, 60 * ctx.budget["queue_limit_minutes"])
+            outcome = ctx.slurm.wait_array(job, 60 * ctx.budget["queue_limit_minutes"], max_parallel)
+            if outcome == "queue_limit":
+                ctx.log(f"confirmation rounds: array job {job} waited longer than the queue limit "
+                        f"(SLURM reason: {ctx.slurm.last_reasons})")
             usage = ctx.slurm.array_accounting(job, len(missing))
             (state / "current_job").unlink(missing_ok=True)
             for index, seed in enumerate(missing):

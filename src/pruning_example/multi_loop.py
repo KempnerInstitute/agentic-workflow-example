@@ -31,8 +31,8 @@ from . import check_report, config, finish, records
 from .agent import Agent, AgentError, AgentFormatError, EFFORT_LEVELS, ModelCheckError, check_model, tokens_used
 from .config import ConfigError
 from .loop import (
-    LEDGER_FIELDS, Context, Ledger, StopLoop, Terminated, check_time_lines, describe_best, job_end_time, log,
-    on_sigterm, render,
+    LEDGER_FIELDS, Context, Ledger, StopLoop, Terminated, check_round_jobs, check_time_lines, describe_best,
+    job_end_time, log, on_sigterm, render,
 )
 from .records import IntegrityError
 from .slurm import Slurm, SlurmError
@@ -143,9 +143,11 @@ def plan_minutes(ctx) -> float:
     return minutes
 
 
-def array_minutes(ctx) -> float:
-    """The time that the loop job needs to run one array job and the final steps."""
-    return (ctx.experiment["round"]["time_minutes"] + ctx.budget["queue_limit_minutes"]
+def array_minutes(ctx, tasks: int) -> float:
+    """The time that the loop job needs to run one array job of tasks rounds, and the final steps. With
+    wave.max_parallel below tasks, the rounds run in turns."""
+    turns = math.ceil(tasks / ctx.experiment["wave"]["max_parallel"])
+    return (turns * ctx.experiment["round"]["time_minutes"] + ctx.budget["queue_limit_minutes"]
             + ctx.budget["final_reserve_minutes"])
 
 
@@ -586,13 +588,15 @@ def submit_wave(ctx, wave: int, accepted: list[dict]) -> int:
     (folder / "array_job").write_text(job + "\n")
     (state / "current_job").write_text(job + "\n")
     ctx.log(f"wave {wave}: submitted array job {job}, rounds {first} to {first + len(lines) - 1}")
-    outcome = ctx.slurm.wait_array(job, 60 * ctx.budget["queue_limit_minutes"])
+    outcome = ctx.slurm.wait_array(job, 60 * ctx.budget["queue_limit_minutes"], ctx.experiment["wave"]["max_parallel"])
     complete = add_round_records(ctx, wave, rounds, job, outcome)
     (state / "current_job").unlink(missing_ok=True)
     write_outcome(ctx, wave, complete, outcome, array_job=job)
     write_hypotheses(ctx)
     log_wave(ctx, wave, [round_no for round_no, _ in rounds])
     if outcome == "queue_limit":
+        ctx.log(f"wave {wave}: array job {job} waited longer than the queue limit "
+                f"(SLURM reason: {ctx.slurm.last_reasons})")
         raise StopLoop("queue_limit")
     return complete
 
@@ -866,6 +870,8 @@ def check_start(ctx, plan_only: bool = False) -> None:
     if not plan_only and not (accepted.exists() and records.read_json(accepted)):
         raise SystemExit("Wave 1 has no accepted configuration. Run 'sbatch --time=01:30:00 slurm/multi_loop.sbatch "
                          "--plan-only', and read the plan first.")
+    one_seed = finish.confirmation_seeds(ctx.experiment) == [1]  # then the confirmation round is one round job
+    check_round_jobs(ctx, ("slurm/round_array.sbatch",) + (("slurm/round.sbatch",) if one_seed else ()))
     clean_up_after_a_stop(ctx)
 
 
@@ -969,7 +975,7 @@ def run_waves(ctx) -> str:
             if not accepted:
                 write_outcome(ctx, wave, 0, "no accepted configuration" if accepted == [] else "a role step failed")
                 continue
-            if not time_for(ctx, array_minutes(ctx)):
+            if not time_for(ctx, array_minutes(ctx, len(accepted))):
                 write_outcome(ctx, wave, 0, "not run: not enough time for the array job and the final steps")
                 return "time_left"
             submit_wave(ctx, wave, accepted)
