@@ -479,6 +479,16 @@ def test_the_loop_job_stops_before_any_agent_step_if_slurm_would_reject_the_roun
     assert agent.calls == 0 and not slurm.submitted
 
 
+def test_the_start_check_covers_each_job_script_that_the_loop_uses(started):
+    for seeds, scripts in (([1], ["slurm/round.sbatch"]),  # one confirmation round: one round job
+                           ([2], ["slurm/round.sbatch", "slurm/round_array.sbatch"])):  # any other seeds: an array job
+        slurm = FakeSlurm(started / "state", lambda n: (0.91, SMALL))
+        ctx = context(started, FakeAgent(lambda call: GOOD), slurm)
+        ctx.experiment["confirmation_seeds"] = seeds
+        loop.check_start(ctx)
+        assert [script for script, _ in slurm.tested] == scripts
+
+
 def test_the_start_check_goes_on_if_the_slurm_controller_does_not_answer(started):
     class BusySlurm(FakeSlurm):
         def test_only(self, script, cwd, options=()):

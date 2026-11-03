@@ -16,7 +16,8 @@ FINAL_STATES = {
 }
 QUEUE_WAIT_STATES = {"PENDING", "REQUEUED", "REQUEUE_HOLD", "REQUEUE_FED", "CONFIGURING"}
 # sbatch errors of a busy SLURM controller. A new try can succeed.
-TRANSIENT_ERRORS = ("Socket timed out", "timed out", "Resource temporarily unavailable", "try again")
+TRANSIENT_ERRORS = ("Socket timed out", "timed out", "Resource temporarily unavailable", "try again",
+                    "Unable to contact slurm controller")
 
 
 class SlurmError(RuntimeError):
@@ -222,10 +223,11 @@ class Slurm:
     def wait_array(self, array_id: str, queue_limit_seconds: float, max_parallel: int | None = None) -> str:
         """Wait until all tasks of an array job leave the queue. Return "ended" or "queue_limit".
 
-        Queue time counts while at least one task waits and fewer than max_parallel tasks run. So a task
-        that waits only because max_parallel tasks of the array already run adds no queue time. After the
-        queue limit, the waiting tasks are canceled, also a task that a preemption put back in the queue,
-        and the running tasks can end.
+        Queue time counts while at least one task waits and fewer than max_parallel tasks are RUNNING. So a
+        task that waits only because max_parallel tasks of the array already run adds no queue time. A task
+        in another state, for example stuck in COMPLETING, does not stop the queue time. After the queue
+        limit, the waiting tasks are canceled, also a task that a preemption put back in the queue, and the
+        running tasks can end.
         """
         queued = 0.0
         last = self.clock()
@@ -244,7 +246,7 @@ class Slurm:
             if states == {}:
                 return "queue_limit" if over_limit else "ended"
             waiting = bool(states) and any(state in QUEUE_WAIT_STATES for state in states.values())
-            running = sum(state not in QUEUE_WAIT_STATES for state in (states or {}).values())
+            running = sum(state == "RUNNING" for state in (states or {}).values())
             if waiting and not over_limit and (max_parallel is None or running < max_parallel):
                 queued += now - last
             last = now

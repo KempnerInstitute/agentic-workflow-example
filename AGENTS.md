@@ -17,7 +17,7 @@ This project prunes ResNet-18 on CIFAR-10 on the Kempner AI cluster. Read this f
 ## Supervised round
 
 - Write the configuration only to `agent/next_config.json`. Use the keys and ranges in `configs/round.schema.json`.
-- Submit the round as a background command: `sbatch --wait slurm/round.sbatch agent/next_config.json`. If `round.partition` or `round.constraint` is set in `experiment.yaml`, add it after `--wait`, for example `--partition=kempner_interactive --constraint=a100-mig`.
+- Submit the round as a background command: `sbatch --wait slurm/round.sbatch agent/next_config.json`. If `round.partition` or `round.constraint` is set in `experiment.yaml`, add each one after `--wait`, for example `--partition=kempner_interactive --constraint=a100-mig`.
 - Run SLURM commands on their own, without pipes, redirects, `cd`, or `$(...)`. The sandbox needs this.
 - Query only your own jobs, with `squeue -j <id>` and `sacct -j <id>`. Do not run `squeue` without `-j`.
 - To check a finished round, run `/check-round N`.

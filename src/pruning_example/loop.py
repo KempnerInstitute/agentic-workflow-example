@@ -309,8 +309,8 @@ def check_start(ctx: Context) -> None:
         raise SystemExit("There is no baseline. Run 'sbatch slurm/baseline.sbatch' first.")
     if not (ctx.paths.state / "rounds" / "round_01" / "metrics.json").exists():
         raise SystemExit("There is no round 1. Run the supervised round first.")
-    several_seeds = len(finish.confirmation_seeds(ctx.experiment)) > 1  # their confirmation rounds run as an array job
-    scripts = ("slurm/round.sbatch",) + (("slurm/round_array.sbatch",) if several_seeds else ())
+    array = finish.confirmation_seeds(ctx.experiment) != [1]  # then the confirmation rounds run as an array job
+    scripts = ("slurm/round.sbatch",) + (("slurm/round_array.sbatch",) if array else ())
     check_time_lines(ctx, scripts)
     records.check_integrity(project)
     check_round_jobs(ctx, scripts)

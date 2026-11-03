@@ -725,6 +725,22 @@ def test_one_gpu_for_each_user_runs_the_rounds_of_a_wave_in_turns(multi):
     assert multi_loop.array_minutes(ctx, 3) == 10 + rest
 
 
+@pytest.mark.parametrize("max_parallel, arrays", [(1, 0), (3, 1)])
+def test_a_wave_runs_only_if_the_loop_job_has_time_for_its_turns(multi, max_parallel, arrays):
+    slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL - n))
+    planner = context(multi, FakeRoles(), slurm)
+    planner.plan_only = True
+    assert multi_loop.run(planner, "plan_only") == 0
+    assert len(records.read_json(state_of(multi) / "waves" / "wave_01" / "accepted.json")) == 3
+    ctx = context(multi, FakeRoles(), slurm)
+    ctx.experiment["wave"]["max_parallel"] = max_parallel
+    # Time for one turn of 10 minutes, the queue limit, and the final reserve, but not for three turns.
+    ctx.clock = lambda: 0.0
+    ctx.job_end = 60 * (10 + ctx.budget["queue_limit_minutes"] + ctx.budget["final_reserve_minutes"] + 5)
+    assert multi_loop.run_waves(ctx) == "time_left"
+    assert len(slurm.arrays) == arrays  # in turns, wave 1 does not fit
+
+
 def test_a_state_folder_with_final_steps_done_refuses_a_new_search(multi):
     slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL - n))
     ctx, code = plan_then_run(multi, FakeRoles(), slurm, max_round_attempts=4)
