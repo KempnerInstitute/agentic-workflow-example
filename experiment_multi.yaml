@@ -1,7 +1,7 @@
 # Settings and limits of the multi-agent design.
 # Read this file before you start the multi-agent loop job: it sets the roles, the models, the effort levels,
-# and the budget. The sections target (val_accuracy), baseline, and round (except constraint) must agree with
-# experiment.yaml; a test checks this.
+# and the budget. The sections target (val_accuracy), baseline, and round (except partition and constraint) must
+# agree with experiment.yaml; a test checks this.
 
 target:
   val_accuracy: 0.905        # accuracy threshold: 0.900 plus a margin for noise in 5,000 validation images
@@ -20,11 +20,12 @@ round:
   batch_size: 256
   momentum: 0.9
   time_minutes: 10           # must agree with --time in slurm/round.sbatch and slurm/round_array.sbatch
+  # partition: kempner_interactive   # optional: replaces the --partition line of the round job scripts
   # constraint: a100|h100|h200|rtx6000pro   # optional: full GPUs in place of the MIG slices of slurm/round_array.sbatch
 
 wave:
   size: 3                    # configurations in each wave; fewer when a limit allows fewer
-  max_parallel: 3            # round jobs of one wave that can run at the same time
+  max_parallel: 3            # round jobs of one wave that can run at the same time; 1 on kempner_interactive
 
 # One model and one effort level for each role. Use full model names: an alias such as opus moves to newer models.
 # Effort levels: low, medium, high, xhigh, max. A checker uses a different model from the role that it checks.
@@ -62,7 +63,7 @@ budget:
   gpu_minutes: 150           # rounds after round 1, on A100 MIG slices; failed and requeued runs count
   max_round_attempts: 45     # round 1 included; all agents of a run share them
   max_failed_waves: 2        # waves in a row with no complete round
-  queue_limit_minutes: 45    # total queue time of one array job, requeues included
-  final_reserve_minutes: 110 # time kept for the final steps
+  queue_limit_minutes: 45    # total queue time of one array job, requeues included, without waits behind its own tasks
+  final_reserve_minutes: 110 # time kept for the final steps; 120 with max_parallel: 1, for 2 confirmation rounds in turns
 
 confirmation_seeds: [1, 2]   # the selected configuration runs again with each seed, as one array job

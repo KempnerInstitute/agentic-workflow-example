@@ -16,7 +16,7 @@ A second version of the loop uses four agent roles and runs 3 rounds at a time; 
 
 ## Before you start
 
-- A Kempner AI cluster account, and a SLURM account that can use `kempner_requeue` and `shared`.
+- A Kempner AI cluster account, and a SLURM account that can use `kempner_requeue` and `shared`. To use `kempner_interactive` in place of `kempner_requeue`, see [Run on kempner_interactive](#run-on-kempner_interactive).
 - Claude Code from the native installer, because the loop job looks for `claude` in `~/.local/bin`. Sign in with the Claude access that HUIT provides through Harvard SSO, and leave `ANTHROPIC_API_KEY` unset.
 - [uv](https://docs.astral.sh/uv/).
 - The data is the shared copy of CIFAR-10 on the cluster. CIFAR-10 is public data (Level 1).
@@ -176,6 +176,26 @@ sbatch slurm/multi_loop.sbatch                               # 3. run the waves 
 
 To audit the report of the single-agent loop, run `STATE_DIR=state sbatch slurm/multi_loop.sbatch --audit-only`. To compare designs, run each one in its own clone with only the baseline and round 1; see [Comparison of the designs](#comparison-of-the-designs).
 
+## Run on kempner_interactive
+
+You can run the GPU jobs of this example on `kempner_interactive` in batch mode, because each job is short and uses one GPU. The partition has only A100 MIG slices (3g.20gb), and each user can use one GPU at a time. The job scripts ask for `kempner_requeue`, and `slurm/baseline.sbatch` and `slurm/round.sbatch` ask for full GPUs, so set the partition and the constraint:
+
+1. In the `round` section of `experiment.yaml`, set `partition: kempner_interactive` and `constraint: a100-mig`. For the multi-agent loop, set the same two lines in `experiment_multi.yaml`.
+2. For the multi-agent loop, also set `wave.max_parallel: 1` and `budget.final_reserve_minutes: 120` in `experiment_multi.yaml`. The rounds of a wave and the two confirmation rounds then run in turns.
+3. Commit the changes.
+4. Train the baseline on a MIG slice:
+
+   ```bash
+   sbatch -p kempner_interactive --constraint=a100-mig slurm/baseline.sbatch
+   ```
+
+5. Run round 1 in the `test` partition, as in [Round 1](#round-1-supervised). The agent adds `--partition=kempner_interactive --constraint=a100-mig` to its `sbatch` command. Check the options before you approve the command.
+6. Start the loop job as usual. It runs on `shared`, and it submits the round jobs to `kempner_interactive`.
+
+- **GPU minutes.** A round uses about 2.6 GPU minutes on a MIG slice, so the default `gpu_minutes` of both loops are enough.
+- **One GPU.** While the loop job runs, do not keep another GPU job on `kempner_interactive`. The round jobs wait for it, and the loop stops at `queue_limit_minutes`. The loop log then shows the SLURM reason `QOSMaxGRESPerUser`.
+- **Start check.** At start, the loop job asks SLURM with `sbatch --test-only` if it would accept the round jobs. If not, the loop job stops before any agent step and shows the SLURM error.
+
 ## Test the loop with small limits
 
 Put test copies in `local/`, which Git ignores. `EXPERIMENT_FILE` and `STATE_DIR` point the jobs to them:
@@ -250,7 +270,7 @@ Claude Code 2.1.302 to 2.1.309 (the multi-agent loop: 2.1.307 to 2.1.309), uv 0.
 ## Adapt the example
 
 - **Task.** Change the data, the model, the metric, the round configuration schema, the accuracy threshold, and the limits.
-- **GPUs.** To run the round jobs on other GPUs, set `round.constraint` in the experiment file. For example, set `a100-mig` in `experiment.yaml` for MIG slices, or `a100|h100|h200|rtx6000pro` in `experiment_multi.yaml` for full GPUs. The loop scripts pass it to `sbatch`, and it replaces the `--constraint` line of the job scripts. A MIG slice is 3 to 4 times slower than a full GPU, so set `gpu_minutes` to match.
+- **GPUs.** To run the round jobs on other GPUs, set `round.constraint` in the experiment file. For example, set `a100-mig` in `experiment.yaml` for MIG slices, or `a100|h100|h200|rtx6000pro` in `experiment_multi.yaml` for full GPUs. The loop scripts pass it to `sbatch`, and it replaces the `--constraint` line of the job scripts. `round.partition` replaces the `--partition` line in the same way; see [Run on kempner_interactive](#run-on-kempner_interactive). A MIG slice is 3 to 4 times slower than a full GPU, so set `gpu_minutes` to match.
 - **Changes.** Commit each change to a tracked file. The jobs refuse to start while a tracked file has changes.
 - **Keep.** Keep the fixed evaluator, the read-only agent step, and the loop script that submits the jobs. Also keep the limits outside the model, the run records, the confirmation round, and the one-time test evaluation.
 

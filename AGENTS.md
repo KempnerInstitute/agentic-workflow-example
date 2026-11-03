@@ -17,7 +17,7 @@ This project prunes ResNet-18 on CIFAR-10 on the Kempner AI cluster. Read this f
 ## Supervised round
 
 - Write the configuration only to `agent/next_config.json`. Use the keys and ranges in `configs/round.schema.json`.
-- Submit the round as a background command: `sbatch --wait slurm/round.sbatch agent/next_config.json`.
+- Submit the round as a background command: `sbatch --wait slurm/round.sbatch agent/next_config.json`. If `round.partition` or `round.constraint` is set in `experiment.yaml`, add it after `--wait`, for example `--partition=kempner_interactive --constraint=a100-mig`.
 - Run SLURM commands on their own, without pipes, redirects, `cd`, or `$(...)`. The sandbox needs this.
 - Query only your own jobs, with `squeue -j <id>` and `sacct -j <id>`. Do not run `squeue` without `-j`.
 - To check a finished round, run `/check-round N`.
@@ -33,5 +33,5 @@ This project prunes ResNet-18 on CIFAR-10 on the Kempner AI cluster. Read this f
 
 - Each role step has a role prompt from `prompts/multi/roles/`: the planner, the critic, the writer, or the auditor. Follow it.
 - The multi-agent loop uses `experiment_multi.yaml` and the state folder `state_multi/`. Read only the state folder that your prompt names, and `state/baseline/metrics.json`.
-- A wave has up to 3 rounds that run at the same time. The loop script stops after `target.plateau_rounds` complete rounds in a row, in round order, without a smaller passing model.
+- A wave has up to 3 rounds, planned together. They run at the same time, or in turns with `wave.max_parallel: 1`. The loop script stops after `target.plateau_rounds` complete rounds in a row, in round order, without a smaller passing model.
 - Return only the required JSON or text. Do not try to run commands or write files. The loop script runs the rounds.
