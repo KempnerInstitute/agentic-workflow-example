@@ -46,14 +46,14 @@ exit
 
 `cluster.env` puts the uv cache and the Python interpreter in lab storage. The agent sandbox hides your home folder, so `.venv/bin/python` must not link to a Python in your home folder.
 
-Train the baseline:
+Train the baseline. On `kempner_interactive`, do not run this command: use the steps in [Run on kempner_interactive](#run-on-kempner_interactive) in place of the baseline and round 1 commands.
 
 ```bash
 source cluster.env
 sbatch slurm/baseline.sbatch             # about 2 minutes on one GPU
 ```
 
-`state/baseline/metrics.json` then shows a validation accuracy of about 0.94. On `kempner_interactive`, use the baseline command in [Run on kempner_interactive](#run-on-kempner_interactive).
+`state/baseline/metrics.json` then shows a validation accuracy of about 0.94.
 
 ## Round 1 (supervised)
 
@@ -196,7 +196,7 @@ Do the setup above, but use these steps in place of the baseline and round 1 com
 6. Start the loop job as usual. It runs on `shared`, and it submits the round jobs to `kempner_interactive`.
 
 - **GPU minutes.** A round uses about 2.6 GPU minutes on a MIG slice. The single-agent loop job then uses about 40 GPU minutes, within its default 60 (`budget.gpu_minutes`). The budget of the multi-agent loop is for MIG slices already.
-- **One GPU.** While the loop job runs, do not keep another GPU job on `kempner_interactive`. A round job waits for it, and if the round job waits more than 45 minutes (`budget.queue_limit_minutes`), the loop stops. The loop log then shows the SLURM reason `QOSMaxGRESPerUser`.
+- **One GPU.** While the loop job runs, do not keep another GPU job on `kempner_interactive`. Another GPU job makes the round jobs wait. If a round job waits more than 45 minutes (`budget.queue_limit_minutes`), the loop stops. The loop log then shows the SLURM reason `QOSMaxGRESPerUser`.
 - **Start check.** Before a search starts, the loop job asks SLURM with `sbatch --test-only` if it would accept the round jobs. If not, the loop job stops before any agent step and shows the SLURM error.
 
 ## Test the loop with small limits
