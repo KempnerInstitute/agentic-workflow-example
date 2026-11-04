@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from pruning_example.slurm import Slurm, parse_array_sacct, parse_array_squeue, task_indexes
+import subprocess
+
+import pytest
+
+from pruning_example.slurm import Slurm, SlurmError, parse_array_sacct, parse_array_squeue, task_indexes
 
 TRES = "billing=8,cpu=8,gres/gpu=1,mem=32G,node=1"
 
@@ -53,6 +57,7 @@ def fake_slurm(states, step: int = 60):
 
     slurm.cancel_waiting = cancel_waiting
     slurm.cancel = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not cancel all tasks"))
+    slurm.pending_reasons = lambda array_id: "QOSMaxGRESPerUser"
     return slurm
 
 
@@ -70,9 +75,87 @@ def test_queue_limit_cancels_only_waiting_tasks_also_after_a_preemption():
         {0: "PENDING"},  # a preemption put task 0 back in the queue: cancel it too
         {},
     ]
-    slurm = fake_slurm(states)
-    assert slurm.wait_array("500", queue_limit_seconds=100) == "queue_limit"
-    assert slurm.waiting_cancels == 2
+    for max_parallel in (None, 3):  # 3 is the default of the waves
+        slurm = fake_slurm(states)
+        assert slurm.wait_array("500", queue_limit_seconds=100, max_parallel=max_parallel) == "queue_limit"
+        assert slurm.waiting_cancels == 2
+
+
+def test_a_task_that_waits_for_a_running_task_of_the_array_adds_no_queue_time():
+    # One GPU for each user: tasks 1 and 2 wait while task 0 runs, then the tasks run in turns.
+    turns = ([{0: "RUNNING", 1: "PENDING", 2: "PENDING"}] * 5 + [{1: "RUNNING", 2: "PENDING"}] * 5
+             + [{2: "RUNNING"}] * 5 + [{}])
+    slurm = fake_slurm(turns)
+    assert slurm.wait_array("500", queue_limit_seconds=100, max_parallel=1) == "ended"
+    assert slurm.waiting_cancels == 0
+    slurm = fake_slurm(turns)  # with room for 3 running tasks, the same waits count
+    assert slurm.wait_array("500", queue_limit_seconds=100, max_parallel=3) == "queue_limit"
+    assert slurm.waiting_cancels > 0
+
+
+def test_a_wait_with_no_running_task_counts_and_keeps_slurms_reason():
+    slurm = fake_slurm([{0: "PENDING", 1: "PENDING"}] * 3 + [{}])
+
+    def reasons(array_id):
+        assert slurm.waiting_cancels == 0  # read before the waiting tasks are canceled
+        return "QOSMaxGRESPerUser"
+
+    slurm.pending_reasons = reasons
+    assert slurm.wait_array("500", queue_limit_seconds=100, max_parallel=1) == "queue_limit"
+    assert slurm.last_reasons == "QOSMaxGRESPerUser"
+    assert slurm.waiting_cancels > 0
+
+
+def test_a_task_stuck_in_completing_does_not_stop_the_queue_time():
+    slurm = fake_slurm([{0: "COMPLETING", 1: "PENDING"}] * 3 + [{}])
+    assert slurm.wait_array("500", queue_limit_seconds=100, max_parallel=1) == "queue_limit"
+
+
+def test_pending_reasons_gives_each_reason_once_or_unknown():
+    answers = iter([Result(0, out="QOSMaxGRESPerUser\nPriority\nQOSMaxGRESPerUser\n"), Result(0, out="")])
+    seen = []
+
+    def run(args, timeout=120, **kwargs):
+        seen.append(args)
+        return next(answers)
+
+    slurm = Slurm(sleep=lambda seconds: None)
+    slurm.run = run
+    assert slurm.pending_reasons("500") == "Priority, QOSMaxGRESPerUser"
+    assert seen[0] == ["squeue", "-h", "-r", "-t", "PENDING", "-j", "500", "-o", "%r"]
+    assert slurm.pending_reasons("500") == "unknown"  # no task waits any more
+
+    def slow(args, timeout=120, **kwargs):
+        raise subprocess.TimeoutExpired(args, timeout)
+
+    slurm.run = slow
+    assert slurm.pending_reasons("500") == "unknown"
+
+
+def test_test_only_returns_slurms_error_and_raises_only_for_a_busy_controller():
+    answers = iter([  # the messages of sbatch --test-only on the cluster
+        Result(0, err="sbatch: Job 57206233 to start at 2026-11-03T01:02:51 using 8 processors on nodes "
+                      "holygpu8a19603 in partition kempner_interactive"),
+        Result(1, err="allocation failure: Requested node configuration is not available"),
+        Result(1, err="allocation failure: Socket timed out on send/recv operation"),
+        Result(1, err="allocation failure: Unable to contact slurm controller (connect failure)"),
+    ])
+    seen = []
+
+    def run(args, timeout=120, **kwargs):
+        seen.append(args)
+        return next(answers)
+
+    slurm = Slurm(sleep=lambda seconds: None)
+    slurm.run = run
+    options = ("--partition=kempner_interactive", "--constraint=a100-mig")
+    assert slurm.test_only("slurm/round.sbatch", ".", options) is None
+    assert seen[0] == ["sbatch", "--test-only", *options, "slurm/round.sbatch"]
+    assert "Requested node configuration is not available" in slurm.test_only("slurm/round.sbatch", ".")
+    with pytest.raises(SlurmError, match="Socket timed out"):
+        slurm.test_only("slurm/round.sbatch", ".")
+    with pytest.raises(SlurmError, match="Unable to contact slurm controller"):  # not a rejection of the job
+        slurm.test_only("slurm/round.sbatch", ".")
 
 
 def test_submit_array_passes_the_range_and_the_throttle():

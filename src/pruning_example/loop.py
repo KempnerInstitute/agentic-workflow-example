@@ -239,7 +239,8 @@ def run_attempt(ctx: Context, round_no: int) -> None:
     rows = [row for row in records.read_history(state) if int(row["round"]) == round_no]
     if outcome == "queue_limit":
         if not rows:
-            fail(ctx, round_no, "queue_limit", f"job {job} waited longer than the queue limit", round_config)
+            fail(ctx, round_no, "queue_limit", f"job {job} waited longer than the queue limit "
+                 f"(SLURM reason: {ctx.slurm.last_reasons})", round_config)
         raise StopLoop("queue_limit")
     if not rows:
         fail(ctx, round_no, "job_failed", f"job {job} ended as {usage.state} without metrics", round_config)
@@ -283,6 +284,23 @@ def check_time_lines(ctx: Context, scripts: tuple[str, ...]) -> None:
                              f"has round.time_minutes {ctx.experiment['round']['time_minutes']}.")
 
 
+def check_round_jobs(ctx: Context, scripts: tuple[str, ...]) -> None:
+    """Refuse to start if SLURM would reject the round jobs, for example for a constraint that no node of the
+    partition has. sbatch --test-only checks each job script with the options from the experiment file."""
+    options = finish.round_job_options(ctx)
+    for script in scripts:
+        try:
+            error = ctx.slurm.test_only(script, ctx.paths.project, options)
+        except (SlurmError, subprocess.TimeoutExpired, OSError) as problem:
+            ctx.log(f"could not check {script} with sbatch --test-only: {problem}")
+            continue
+        if error:
+            experiment_file = config.experiment_path(ctx.paths.project).relative_to(ctx.paths.project)
+            raise SystemExit(f"SLURM would reject the round jobs of {script} with the options "
+                             f"{' '.join(options) or '(none)'}: {error}\nCheck round.partition and "
+                             f"round.constraint in {experiment_file}.")
+
+
 def check_start(ctx: Context) -> None:
     """Refuse to start without the baseline and round 1, with settings that do not agree, or after the final steps."""
     project = ctx.paths.project
@@ -291,9 +309,11 @@ def check_start(ctx: Context) -> None:
         raise SystemExit("There is no baseline. Run 'sbatch slurm/baseline.sbatch' first.")
     if not (ctx.paths.state / "rounds" / "round_01" / "metrics.json").exists():
         raise SystemExit("There is no round 1. Run the supervised round first.")
-    several_seeds = len(finish.confirmation_seeds(ctx.experiment)) > 1  # their confirmation rounds run as an array job
-    check_time_lines(ctx, ("slurm/round.sbatch",) + (("slurm/round_array.sbatch",) if several_seeds else ()))
+    array = finish.confirmation_seeds(ctx.experiment) != [1]  # then the confirmation rounds run as an array job
+    scripts = ("slurm/round.sbatch",) + (("slurm/round_array.sbatch",) if array else ())
+    check_time_lines(ctx, scripts)
     records.check_integrity(project)
+    check_round_jobs(ctx, scripts)
     notes = ctx.paths.state / "notes.md"
     if not notes.exists():
         first = records.read_json(ctx.paths.state / "rounds" / "round_01" / "config.json")

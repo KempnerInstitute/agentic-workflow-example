@@ -110,6 +110,14 @@ class FakeArraySlurm:
         self.arrays = []
         self.canceled = []
         self.options = []
+        self.waits = []  # the max_parallel of each wait_array
+        self.tested = []  # (script, options) of each sbatch --test-only
+        self.test_errors = {}  # script -> the error that sbatch --test-only returns
+        self.last_reasons = ""
+
+    def test_only(self, script, cwd, options=()):
+        self.tested.append((script, options))
+        return self.test_errors.get(script)
 
     def submit_array(self, script, tasks_file, count, max_parallel, cwd, options=()):
         self.options.append(options)
@@ -126,9 +134,12 @@ class FakeArraySlurm:
                                    int(seed), *outcome, job_id=f"{job}{index}")
         return job
 
-    def wait_array(self, job, queue_limit_seconds):
+    def wait_array(self, job, queue_limit_seconds, max_parallel=None):
+        self.waits.append(max_parallel)
         if self.stop_on_wave is not None and len(self.arrays) == self.stop_on_wave:
             raise Terminated()
+        if self.outcome == "queue_limit":
+            self.last_reasons = "QOSMaxGRESPerUser"
         return self.outcome
 
     def array_accounting(self, job, count):
@@ -372,10 +383,13 @@ def test_queue_limit_stops_after_the_wave(multi):
     slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL) if n == 2 else None,
                            outcome="queue_limit")
     ctx = context(multi, FakeRoles(), slurm)
+    messages = []
+    ctx.log = messages.append
     multi_loop.copy_round_one(ctx)
     assert multi_loop.run_waves(ctx) == "queue_limit"
     statuses = [row["status"] for row in records.read_history(ctx.paths.state)]
     assert statuses == ["ok", "ok", "queue_limit", "queue_limit"]
+    assert any("SLURM reason: QOSMaxGRESPerUser" in message for message in messages)
 
 
 # Stops and missing rows
@@ -470,7 +484,8 @@ def test_experiment_files_agree():
     assert multi["target"]["val_accuracy"] == single["target"]["val_accuracy"]
     assert multi["baseline"] == single["baseline"]
     for experiment in (single, multi):
-        experiment["round"].pop("constraint", None)  # the GPUs can differ; the other round settings cannot
+        for key in ("partition", "constraint"):  # the partition and the GPUs can differ; the other settings cannot
+            experiment["round"].pop(key, None)
     assert multi["round"] == single["round"]
     multi_loop.check_roles(multi)
     assert multi["roles"]["planner"]["model"] != multi["roles"]["critic"]["model"]
@@ -571,7 +586,7 @@ def test_finish_closes_the_wave_of_a_stopped_loop_job(multi):
     accepted = records.read_json(state_of(multi) / "waves" / "wave_01" / "accepted.json")
     # The loop job submits wave 1 and gets SIGKILL: no handler runs, so current_job stays.
     original_wait = slurm.wait_array
-    slurm.wait_array = lambda job, limit: (_ for _ in ()).throw(KeyboardInterrupt())
+    slurm.wait_array = lambda job, limit, max_parallel=None: (_ for _ in ()).throw(KeyboardInterrupt())
     with pytest.raises(KeyboardInterrupt):
         multi_loop.submit_wave(ctx, 1, accepted)
     slurm.wait_array = original_wait
@@ -667,15 +682,63 @@ def test_check_report_reads_the_baseline_metrics(tmp_path):
     assert check_report.unmatched_numbers(report, state, tmp_path / config.BASELINE_METRICS) == []
 
 
-def test_round_constraint_reaches_the_array_jobs(multi):
+def test_round_partition_and_constraint_reach_the_array_jobs(multi):
     slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL - n))
     planner = context(multi, FakeRoles(), slurm)
     planner.plan_only = True
     assert multi_loop.run(planner, "plan_only") == 0
     ctx = context(multi, FakeRoles(), slurm, max_round_attempts=4)
-    ctx.experiment["round"]["constraint"] = "a100-mig"
+    ctx.experiment["round"].update(partition="kempner_interactive", constraint="a100-mig")
     assert multi_loop.run(ctx, "loop") == 0
-    assert slurm.options == [("--constraint=a100-mig",)] * 2  # the wave and the confirmation rounds
+    expected = ("--partition=kempner_interactive", "--constraint=a100-mig")
+    assert slurm.options == [expected] * 2  # the wave and the confirmation rounds
+    assert slurm.tested[-1] == ("slurm/round_array.sbatch", expected)  # the start check of the loop job
+
+
+def test_plan_only_stops_before_any_role_step_if_slurm_would_reject_the_array_jobs(multi):
+    slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: None)
+    slurm.test_errors["slurm/round_array.sbatch"] = ("sbatch: error: invalid partition specified: kempner_interactiv\n"
+                                                     "allocation failure: Invalid partition name specified")
+    agent = FakeRoles()
+    ctx = context(multi, agent, slurm)
+    ctx.plan_only = True
+    ctx.experiment["round"]["partition"] = "kempner_interactiv"
+    with pytest.raises(SystemExit, match="SLURM would reject the round jobs of slurm/round_array.sbatch"):
+        multi_loop.run(ctx, "plan_only")
+    assert not agent.calls
+
+
+def test_one_gpu_for_each_user_runs_the_rounds_of_a_wave_in_turns(multi):
+    slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL - n))
+    planner = context(multi, FakeRoles(), slurm)
+    planner.plan_only = True
+    assert multi_loop.run(planner, "plan_only") == 0
+    ctx = context(multi, FakeRoles(), slurm, max_round_attempts=4)
+    ctx.experiment["wave"]["max_parallel"] = 1
+    assert multi_loop.run(ctx, "loop") == 0
+    assert [max_parallel for _, _, max_parallel in slurm.arrays] == [1, 1]  # the throttle of the wave and the seeds
+    assert slurm.waits == [1, 1]  # so a task that waits for the task before it adds no queue time
+    # The loop job plans the time limit of each turn: 3 rounds take 3 turns of 10 minutes.
+    rest = ctx.budget["queue_limit_minutes"] + ctx.budget["final_reserve_minutes"]
+    assert multi_loop.array_minutes(ctx, 3) == 30 + rest
+    ctx.experiment["wave"]["max_parallel"] = 3
+    assert multi_loop.array_minutes(ctx, 3) == 10 + rest
+
+
+@pytest.mark.parametrize("max_parallel, arrays", [(1, 0), (3, 1)])
+def test_a_wave_runs_only_if_the_loop_job_has_time_for_its_turns(multi, max_parallel, arrays):
+    slurm = FakeArraySlurm(state_of(multi), lambda n, kind, seed: (0.91, SMALL - n))
+    planner = context(multi, FakeRoles(), slurm)
+    planner.plan_only = True
+    assert multi_loop.run(planner, "plan_only") == 0
+    assert len(records.read_json(state_of(multi) / "waves" / "wave_01" / "accepted.json")) == 3
+    ctx = context(multi, FakeRoles(), slurm)
+    ctx.experiment["wave"]["max_parallel"] = max_parallel
+    # Time for one turn of 10 minutes, the queue limit, and the final reserve, but not for three turns.
+    ctx.clock = lambda: 0.0
+    ctx.job_end = 60 * (10 + ctx.budget["queue_limit_minutes"] + ctx.budget["final_reserve_minutes"] + 5)
+    assert multi_loop.run_waves(ctx) == "time_left"
+    assert len(slurm.arrays) == arrays  # in turns, wave 1 does not fit
 
 
 def test_a_state_folder_with_final_steps_done_refuses_a_new_search(multi):

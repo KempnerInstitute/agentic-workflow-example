@@ -16,7 +16,8 @@ FINAL_STATES = {
 }
 QUEUE_WAIT_STATES = {"PENDING", "REQUEUED", "REQUEUE_HOLD", "REQUEUE_FED", "CONFIGURING"}
 # sbatch errors of a busy SLURM controller. A new try can succeed.
-TRANSIENT_ERRORS = ("Socket timed out", "timed out", "Resource temporarily unavailable", "try again")
+TRANSIENT_ERRORS = ("Socket timed out", "timed out", "Resource temporarily unavailable", "try again",
+                    "Unable to contact slurm controller")
 
 
 class SlurmError(RuntimeError):
@@ -130,6 +131,7 @@ class Slurm:
         self.poll_seconds = poll_seconds
         self.sleep = sleep
         self.clock = clock
+        self.last_reasons = ""  # SLURM's reasons for the wait of the last job that reached the queue limit
 
     def run(self, args: list[str], timeout: int = 120, **kwargs) -> subprocess.CompletedProcess:
         return subprocess.run(args, capture_output=True, text=True, timeout=timeout, **kwargs)
@@ -151,6 +153,17 @@ class Slurm:
         """Submit an array job with one task for each line of tasks_file, at most max_parallel at a time."""
         return self.submit(script, [tasks_file], cwd, options=(f"--array=0-{count - 1}%{max_parallel}", *options))
 
+    def test_only(self, script: str, cwd, options: tuple = ()) -> str | None:
+        """Ask SLURM if it would accept the job script with the options, without a submit (sbatch --test-only).
+        Return None if it would, or SLURM's error. Raise SlurmError if the controller is too busy to answer."""
+        result = self.run(["sbatch", "--test-only", *options, script], cwd=cwd, env=clean_env())
+        if result.returncode == 0:
+            return None
+        error = result.stderr.strip() or result.stdout.strip()
+        if any(text in error for text in TRANSIENT_ERRORS):
+            raise SlurmError(f"sbatch --test-only failed: {error}")
+        return error or "sbatch --test-only failed"
+
     def queue_state(self, job_id: str) -> str | None:
         """Return the state of the job in the queue, or None if the job left the queue."""
         result = self.run(["squeue", "-h", "-j", job_id, "-o", "%T"], timeout=60)
@@ -169,6 +182,15 @@ class Slurm:
                 return {}
             raise SlurmError(f"squeue failed: {result.stderr.strip()}")
         return parse_array_squeue(result.stdout)
+
+    def pending_reasons(self, job_id: str) -> str:
+        """Return SLURM's reasons why the job, or the tasks of an array job, still wait, for the log."""
+        try:
+            result = self.run(["squeue", "-h", "-r", "-t", "PENDING", "-j", job_id, "-o", "%r"], timeout=60)
+        except (subprocess.TimeoutExpired, OSError):
+            return "unknown"
+        reasons = sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
+        return ", ".join(reasons) or "unknown"
 
     def wait(self, job_id: str, queue_limit_seconds: float) -> str:
         """Wait until the job leaves the queue. Return "ended" or "queue_limit".
@@ -194,14 +216,18 @@ class Slurm:
                 queued += now - last
             last = now
             if queued > queue_limit_seconds:
+                self.last_reasons = self.pending_reasons(job_id)
                 return "queue_limit"
             self.sleep(self.poll_seconds)
 
-    def wait_array(self, array_id: str, queue_limit_seconds: float) -> str:
+    def wait_array(self, array_id: str, queue_limit_seconds: float, max_parallel: int | None = None) -> str:
         """Wait until all tasks of an array job leave the queue. Return "ended" or "queue_limit".
 
-        Queue time counts while at least one task waits. After the queue limit, the waiting tasks are
-        canceled, also a task that a preemption put back in the queue, and the running tasks can end.
+        Queue time counts while at least one task waits and fewer than max_parallel tasks are RUNNING. So a
+        task that waits only because max_parallel tasks of the array already run adds no queue time. A task
+        in another state, for example stuck in COMPLETING, does not stop the queue time. After the queue
+        limit, the waiting tasks are canceled, also a task that a preemption put back in the queue, and the
+        running tasks can end.
         """
         queued = 0.0
         last = self.clock()
@@ -220,11 +246,13 @@ class Slurm:
             if states == {}:
                 return "queue_limit" if over_limit else "ended"
             waiting = bool(states) and any(state in QUEUE_WAIT_STATES for state in states.values())
-            if waiting and not over_limit:
+            running = sum(state == "RUNNING" for state in (states or {}).values())
+            if waiting and not over_limit and (max_parallel is None or running < max_parallel):
                 queued += now - last
             last = now
-            if queued > queue_limit_seconds:
+            if queued > queue_limit_seconds and not over_limit:
                 over_limit = True
+                self.last_reasons = self.pending_reasons(array_id)
             if over_limit and waiting:
                 self.cancel_waiting(array_id)
             self.sleep(self.poll_seconds)

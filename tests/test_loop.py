@@ -68,6 +68,13 @@ class FakeSlurm:
         self.submitted = []
         self.canceled = []
         self.options = []
+        self.tested = []  # (script, options) of each sbatch --test-only
+        self.test_errors = {}  # script -> the error that sbatch --test-only returns
+        self.last_reasons = ""
+
+    def test_only(self, script, cwd, options=()):
+        self.tested.append((script, options))
+        return self.test_errors.get(script)
 
     def submit(self, script, args, cwd, options=()):
         self.options.append(options)
@@ -269,7 +276,9 @@ def test_queue_time_adds_up_over_requeues():
     times = iter(range(0, 1000, 60))
     slurm = Slurm(sleep=lambda seconds: None, clock=lambda: next(times))
     slurm.queue_state = lambda job_id: next(states)
+    slurm.pending_reasons = lambda job_id: "Priority"
     assert slurm.wait("1", queue_limit_seconds=150) == "queue_limit"
+    assert slurm.last_reasons == "Priority"  # read before the loop script cancels the job
 
 
 def test_select_round_rules():
@@ -447,13 +456,61 @@ def test_finish_counts_the_confirmation_job_that_a_stopped_loop_job_canceled(sta
     assert not (state / finish.PENDING_FILE).exists()
 
 
-def test_round_constraint_in_the_experiment_file_reaches_each_round_job(started):
+def test_round_partition_and_constraint_in_the_experiment_file_reach_each_round_job(started):
     slurm = FakeSlurm(started / "state", lambda n: (0.91, SMALL))
     ctx = context(started, FakeAgent(lambda call: GOOD), slurm, plateau_rounds=1)
-    assert finish.round_job_options(ctx) == ()  # unset: the --constraint line of the job script applies
-    ctx.experiment["round"]["constraint"] = "a100-mig"
+    assert finish.round_job_options(ctx) == ()  # unset: the lines of the job script apply
+    ctx.experiment["round"].update(partition="kempner_interactive", constraint="a100-mig")
     assert loop.run_rounds(ctx) == "plateau"
-    assert slurm.options and all(options == ("--constraint=a100-mig",) for options in slurm.options)
+    expected = ("--partition=kempner_interactive", "--constraint=a100-mig")
+    assert slurm.options and all(options == expected for options in slurm.options)
+
+
+def test_the_loop_job_stops_before_any_agent_step_if_slurm_would_reject_the_round_jobs(started):
+    slurm = FakeSlurm(started / "state", lambda n: (0.91, SMALL))
+    slurm.test_errors["slurm/round.sbatch"] = "allocation failure: Requested node configuration is not available"
+    agent = FakeAgent(lambda call: GOOD)
+    ctx = context(started, agent, slurm)
+    ctx.experiment["round"]["partition"] = "kempner_interactive"  # the script asks for full GPUs, which it has not
+    with pytest.raises(SystemExit, match="Requested node configuration is not available"):
+        loop.run(ctx)
+    assert slurm.tested == [("slurm/round.sbatch", ("--partition=kempner_interactive",))]
+    assert agent.calls == 0 and not slurm.submitted
+
+
+def test_the_start_check_covers_each_job_script_that_the_loop_uses(started):
+    for seeds, scripts in (([1], ["slurm/round.sbatch"]),  # one confirmation round: one round job
+                           ([2], ["slurm/round.sbatch", "slurm/round_array.sbatch"])):  # any other seeds: an array job
+        slurm = FakeSlurm(started / "state", lambda n: (0.91, SMALL))
+        ctx = context(started, FakeAgent(lambda call: GOOD), slurm)
+        ctx.experiment["confirmation_seeds"] = seeds
+        loop.check_start(ctx)
+        assert [script for script, _ in slurm.tested] == scripts
+
+
+def test_the_start_check_goes_on_if_the_slurm_controller_does_not_answer(started):
+    class BusySlurm(FakeSlurm):
+        def test_only(self, script, cwd, options=()):
+            raise SlurmError("sbatch --test-only failed: Socket timed out on send/recv operation")
+
+    messages = []
+    ctx = context(started, FakeAgent(lambda call: GOOD), BusySlurm(started / "state", lambda n: (0.91, SMALL)))
+    ctx.log = messages.append
+    loop.check_start(ctx)
+    assert any("could not check slurm/round.sbatch" in message for message in messages)
+
+
+def test_a_round_job_at_the_queue_limit_stops_the_loop_with_slurms_reason(started):
+    class FullSlurm(FakeSlurm):
+        def wait(self, job_id, queue_limit_seconds):
+            self.last_reasons = "QOSMaxGRESPerUser"  # another GPU job of the user holds the one GPU
+            return "queue_limit"
+
+    slurm = FullSlurm(started / "state", lambda n: None)
+    assert loop.run_rounds(context(started, FakeAgent(lambda call: GOOD), slurm)) == "queue_limit"
+    assert slurm.canceled == ["1001"]
+    row = records.read_history(started / "state")[-1]
+    assert row["status"] == "queue_limit" and "SLURM reason: QOSMaxGRESPerUser" in row["note"]
 
 
 def test_a_state_folder_with_final_steps_done_refuses_a_new_search(started, monkeypatch):

@@ -16,7 +16,7 @@ A second version of the loop uses four agent roles and runs 3 rounds at a time; 
 
 ## Before you start
 
-- A Kempner AI cluster account, and a SLURM account that can use `kempner_requeue` and `shared`.
+- A Kempner AI cluster account, and a SLURM account that can use `kempner_requeue` and `shared`. To use `kempner_interactive` in place of `kempner_requeue`, see [Run on kempner_interactive](#run-on-kempner_interactive).
 - Claude Code from the native installer, because the loop job looks for `claude` in `~/.local/bin`. Sign in with the Claude access that HUIT provides through Harvard SSO, and leave `ANTHROPIC_API_KEY` unset.
 - [uv](https://docs.astral.sh/uv/).
 - The data is the shared copy of CIFAR-10 on the cluster. CIFAR-10 is public data (Level 1).
@@ -46,7 +46,7 @@ exit
 
 `cluster.env` puts the uv cache and the Python interpreter in lab storage. The agent sandbox hides your home folder, so `.venv/bin/python` must not link to a Python in your home folder.
 
-Train the baseline:
+Train the baseline. On `kempner_interactive`, do not run this command: use the steps in [Run on kempner_interactive](#run-on-kempner_interactive) in place of the baseline and round 1 commands.
 
 ```bash
 source cluster.env
@@ -176,6 +176,29 @@ sbatch slurm/multi_loop.sbatch                               # 3. run the waves 
 
 To audit the report of the single-agent loop, run `STATE_DIR=state sbatch slurm/multi_loop.sbatch --audit-only`. To compare designs, run each one in its own clone with only the baseline and round 1; see [Comparison of the designs](#comparison-of-the-designs).
 
+## Run on kempner_interactive
+
+You can run the GPU jobs of this example on `kempner_interactive` in batch mode, because each job is short and uses one GPU. The partition has only A100 MIG slices (3g.20gb), and each user can use one GPU at a time. The job scripts ask for `kempner_requeue`, and `slurm/baseline.sbatch` and `slurm/round.sbatch` ask for full GPUs. On `kempner_interactive`, SLURM rejects these two scripts with `Requested node configuration is not available`, so set the partition and the constraint.
+
+Do the setup above, but use these steps in place of the baseline and round 1 commands:
+
+1. In the `round` section of `experiment.yaml`, set `partition: kempner_interactive` and `constraint: a100-mig`. For the multi-agent loop, set the same two lines in `experiment_multi.yaml`.
+2. For the multi-agent loop, also set `wave.max_parallel: 1` and `budget.final_reserve_minutes: 120` in `experiment_multi.yaml`. The rounds of a wave and the two confirmation rounds then run in turns.
+3. Commit the changes.
+4. Train the baseline on a MIG slice:
+
+   ```bash
+   source cluster.env
+   sbatch --partition=kempner_interactive --constraint=a100-mig slurm/baseline.sbatch   # about 5 minutes on a MIG slice
+   ```
+
+5. Run round 1 in the `test` partition, as in [Round 1](#round-1-supervised). In the prompt, write the command as `sbatch --wait --partition=kempner_interactive --constraint=a100-mig slurm/round.sbatch agent/next_config.json`. Refuse the command if it does not have these two options.
+6. Start the loop job as usual. It runs on `shared`, and it submits the round jobs to `kempner_interactive`.
+
+- **GPU minutes.** A round uses about 2.6 GPU minutes on a MIG slice. The single-agent loop job then uses about 40 GPU minutes, within its default 60 (`budget.gpu_minutes`). The budget of the multi-agent loop is for MIG slices already.
+- **One GPU.** While the loop job runs, do not keep another GPU job on `kempner_interactive`. Another GPU job makes the round jobs wait. If a round job waits more than 45 minutes (`budget.queue_limit_minutes`), the loop stops. The loop log then shows the SLURM reason `QOSMaxGRESPerUser`.
+- **Start check.** Before a search starts, the loop job asks SLURM with `sbatch --test-only` if it would accept the round jobs. If not, the loop job stops before any agent step and shows the SLURM error.
+
 ## Test the loop with small limits
 
 Put test copies in `local/`, which Git ignores. `EXPERIMENT_FILE` and `STATE_DIR` point the jobs to them:
@@ -245,12 +268,12 @@ Each design ran one time, from the same baseline and round 1, with the same sear
 
 ## Tested with
 
-Claude Code 2.1.302 to 2.1.309 (the multi-agent loop: 2.1.307 to 2.1.309), uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04. GPUs: A100 (full GPUs and 3g.20gb MIG slices), H100, H200, and RTX PRO 6000.
+Claude Code 2.1.302 to 2.1.317 (the multi-agent loop: 2.1.307 to 2.1.317), uv 0.8.19, Python 3.12.11, PyTorch 2.14.1 with CUDA 13.0, torchvision 0.29.1, and NVIDIA driver 610.57.04. GPUs: A100 (full GPUs, and 3g.20gb MIG slices on `kempner_requeue` and `kempner_interactive`), H100, H200, and RTX PRO 6000.
 
 ## Adapt the example
 
 - **Task.** Change the data, the model, the metric, the round configuration schema, the accuracy threshold, and the limits.
-- **GPUs.** To run the round jobs on other GPUs, set `round.constraint` in the experiment file. For example, set `a100-mig` in `experiment.yaml` for MIG slices, or `a100|h100|h200|rtx6000pro` in `experiment_multi.yaml` for full GPUs. The loop scripts pass it to `sbatch`, and it replaces the `--constraint` line of the job scripts. A MIG slice is 3 to 4 times slower than a full GPU, so set `gpu_minutes` to match.
+- **GPUs.** To run the round jobs on other GPUs, set `round.constraint` in the experiment file. For example, set `a100-mig` in `experiment.yaml` for MIG slices, or `a100|h100|h200|rtx6000pro` in `experiment_multi.yaml` for full GPUs. The loop scripts pass it to `sbatch`, and it replaces the `--constraint` line of the job scripts. `round.partition` replaces the `--partition` line in the same way; see [Run on kempner_interactive](#run-on-kempner_interactive). A round uses about 1.2 GPU minutes on a full GPU and about 2.6 on a MIG slice, so set `budget.gpu_minutes` to match.
 - **Changes.** Commit each change to a tracked file. The jobs refuse to start while a tracked file has changes.
 - **Keep.** Keep the fixed evaluator, the read-only agent step, and the loop script that submits the jobs. Also keep the limits outside the model, the run records, the confirmation round, and the one-time test evaluation.
 
